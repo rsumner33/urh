@@ -1,45 +1,86 @@
-# Requirements
+# Universal Radio Hacker
+[![Build Status](https://travis-ci.org/jopohl/urh.svg?branch=master)](https://travis-ci.org/jopohl/urh) [![Code Climate](https://codeclimate.com/github/jopohl/urh/badges/gpa.svg)](https://codeclimate.com/github/jopohl/urh) [![PyPI version](https://badge.fury.io/py/urh.svg)](https://pypi.python.org/pypi/urh) [![Dependency Status](https://gemnasium.com/badges/github.com/jopohl/urh.svg)](https://gemnasium.com/github.com/jopohl/urh)
+
+The Universal Radio Hacker is a software for investigating unknown wireless protocols. Features include
+
+* __hardware interfaces__ for common Software Defined Radios
+* __easy demodulation__ of signals
+* __assigning participants__ to keep overview of your data
+* __customizable decodings__ to crack even sophisticated encodings like CC1101 data whitening
+* __assign labels__ to reveal the logic of the protocol
+* __fuzzing component__ to find security leaks
+* __modulation support__ to inject the data back into the system
+
+Check out the [wiki](https://github.com/jopohl/urh/wiki) for more information.
+
+Like to see things in action? Watch URH on YouTube!
+
+[![Youtube Image](http://i.imgur.com/5HGzP2T.png)](https://www.youtube.com/watch?v=kuubkTDAxwA)
+
+## Installation
+### Requirements
 - Python 3.4+
-- numpy
+- numpy / psutil
 - PyQt5
 - C++ Compiler
 
-# Installation
-## Arch Linux
+### Arch Linux
 ```bash
 yaourt -S urh
 ```
 
-## Ubuntu/Debian
+### Ubuntu/Debian
 ```bash
 sudo apt-get update
-sudo apt-get install python3-numpy python3-pyqt5 g++ libpython3-dev python3-pip
+sudo apt-get install python3-numpy python3-psutil python3-pyqt5 g++ libpython3-dev python3-pip
 sudo pip3 install urh
 ```
 
-## Windows
-1. Install [Visual Studio 2015 Community](https://www.visualstudio.com/de-de/downloads/download-visual-studio-vs.aspx) - ensure you tick C++ language
-2. Install [Python 3.5 for Windows](https://www.python.org/downloads/windows/)
-3. Install [PyQt5 for Windows](https://www.riverbankcomputing.com/software/pyqt/download5)
-4. Open a terminal (__cmd__) and type: ```pip install numpy```
-5. After that, type ```pip install urh```
-6. Navigate to ```C:\Users\<Your-Username>\AppData\Local\Programs\Python\Python35\Scripts```
-7. In a terminal (__cmd__) type ```python urh```
+### Windows
+1. Install [Visual C++ Build Tools](http://landinghub.visualstudio.com/visual-cpp-build-tools).
+2. Install [Python 3.5 for Windows](https://www.python.org/downloads/windows/).
+3. (Optional) Open a terminal (__cmd__) and type: ``` pip install numpy ``` - _This speeds the installation up a bit._
+4. In a terminal, type: ``` pip install urh ```.
+5. Type ``` urh ``` in a terminal or search for ``` urh ``` in search bar.
 
+### Mac OS X
+1. Install [Python 3 for Mac OS X](https://www.python.org/downloads/mac-osx/).
+2. In a terminal, type: ``` pip3 install urh ```.
+3. Type ``` urh ``` in a terminal to get it started.
 
-## From cloned repository
-```bash
-git clone https://github.com/jopohl/urh/
-cd urh
-sudo python setup.py install
-```
+### Running from source
+If you like to live on bleeding edge, you can run URH from source.
 
-# Running from source
+#### Without Installation
 To execute the Universal Radio Hacker without installation, just run:
 ```bash
 git clone https://github.com/jopohl/urh/
-cd urh/bin
-./urh
+cd urh/src/urh
+./main.py
 ```
 
 Note, before first usage the C++ extensions will be built.
+
+#### Installing from source
+To install from source you need to have ``` python-setuptools ``` installed. You can get it e.g. with ``` pip install setuptools ```. 
+Once the setuptools are installed use: 
+```bash
+git clone https://github.com/jopohl/urh/
+cd urh
+python setup.py install
+```
+
+And start the application by typing ``` urh ``` in a terminal.
+
+
+
+## Screenshots
+### Get the data out of raw signals
+![Interpretation phase](http://i.imgur.com/Wy17Zv3.png)
+
+
+### Keep an overview even on complex protocols
+ ![Analysis phase](http://i.imgur.com/ubAL3pE.png)
+
+### Record and send signals
+ ![Record](http://i.imgur.com/BfQpg23.png)

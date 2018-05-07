@@ -5,7 +5,7 @@ from PyQt5.QtCore import QDir, Qt, QObject, pyqtSignal
 from PyQt5.QtWidgets import QMessageBox
 
 from urh import constants
-from urh.signalprocessing.LabelSet import LabelSet
+from urh.signalprocessing.MessageType import MessageType
 from urh.signalprocessing.Modulator import Modulator
 from urh.signalprocessing.Participant import Participant
 from urh.signalprocessing.ProtocoLabel import ProtocolLabel
@@ -32,6 +32,7 @@ class ProjectManager(QObject):
         self.device = "USRP"
         self.description = ""
         self.project_path = ""
+        self.broadcast_address_hex = "ffff"
         self.__project_file = None
         self.participants = []
 
@@ -71,25 +72,16 @@ class ProjectManager(QObject):
         self.bandwidth = float(root.get("bandwidth", 1e6))
         self.gain = int(root.get("gain", 20))
         self.description = root.get("description", "").replace(self.NEWLINE_CODE, "\n")
+        self.broadcast_address_hex = root.get("broadcast_address_hex", "ffff")
 
-        try:
-            self.participants = [Participant.from_xml(part_tag) for part_tag in root.find("participants").findall("participant")]
-        except AttributeError:
-            self.participants = []
-
-    def read_compare_frame_blocks(self, root, compare_frame_controller):
-        tag = root.find("protocol")
-        cfc = compare_frame_controller
-        cfc.proto_analyzer.from_xml(protocol_tag=tag, participants=self.participants, decoders=cfc.decodings)
-
-    def read_labelsets(self):
+    def read_message_types(self):
         if self.project_file is None:
             return None
 
         tree = ET.parse(self.project_file)
         root = tree.getroot()
         try:
-            return [LabelSet.from_xml(lblset_tag) for lblset_tag in root.find("labelsets").findall("labelset")]
+            return [MessageType.from_xml(msg_type_tag) for msg_type_tag in root.find("protocol").find("message_types").findall("message_type")]
         except AttributeError:
             return []
 
@@ -98,6 +90,7 @@ class ProjectManager(QObject):
             self.maincontroller.close_all()
         self.project_path = path
         self.project_file = os.path.join(self.project_path, constants.PROJECT_FILE)
+        collapse_project_tabs = False
         if not os.path.isfile(self.project_file):
             if ask_for_new_project:
                 reply = QMessageBox.question(self.maincontroller, "Project File",
@@ -106,7 +99,7 @@ class ProjectManager(QObject):
                                              QMessageBox.Yes | QMessageBox.No)
 
                 if reply == QMessageBox.Yes:
-                    self.maincontroller.on_project_settings_clicked()
+                    self.maincontroller.show_project_settings()
                 else:
                     self.project_file = None
 
@@ -118,21 +111,21 @@ class ProjectManager(QObject):
             tree = ET.parse(self.project_file)
             root = tree.getroot()
 
+            collapse_project_tabs = bool(int(root.get("collapse_project_tabs", 0)))
+            cfc = self.maincontroller.compare_frame_controller
             self.read_parameters(root)
+            self.participants = cfc.proto_analyzer.read_participants_from_xml_tag(root=root.find("protocol"))
             self.maincontroller.add_files(self.read_opened_filenames())
             self.read_compare_frame_groups(root)
-            cfc = self.maincontroller.compare_frame_controller
-            cfc.load_decodings()
+            decodings = cfc.proto_analyzer.read_decoders_from_xml_tag(root.find("protocol"))
+            if decodings:
+                cfc.decodings = decodings
             cfc.fill_decoding_combobox()
 
-            for group_id, decoding_index in self.read_decodings().items():
-                cfc.groups[group_id].decoding = cfc.decodings[decoding_index]
+            cfc.proto_analyzer.message_types = self.read_message_types()
+            cfc.fill_message_type_combobox()
+            cfc.proto_analyzer.from_xml_tag(root=root.find("protocol"), participants=self.participants, decodings=cfc.decodings)
 
-            cfc.proto_analyzer.labelsets = self.read_labelsets()
-            cfc.fill_labelset_combobox()
-            self.read_compare_frame_blocks(root=root, compare_frame_controller=cfc)
-
-            #cfc.ui.cbDecoding.setCurrentIndex(index)
             cfc.updateUI()
             modulators = self.read_modulators_from_project_file()
             self.maincontroller.generator_tab_controller.modulators = modulators if modulators else [
@@ -144,12 +137,18 @@ class ProjectManager(QObject):
         else:
             self.maincontroller.ui.actionConvert_Folder_to_Project.setEnabled(False)
 
-        self.maincontroller.adjustForCurrentFile(path)
+        self.maincontroller.adjust_for_current_file(path)
         self.maincontroller.filemodel.setRootPath(path)
         self.maincontroller.ui.fileTree.setRootIndex(
             self.maincontroller.file_proxy_model.mapFromSource(self.maincontroller.filemodel.index(path)))
         self.maincontroller.ui.fileTree.setToolTip(path)
         self.maincontroller.ui.splitter.setSizes([1, 1])
+        if collapse_project_tabs:
+            self.maincontroller.collapse_project_tab_bar()
+        else:
+            self.maincontroller.expand_project_tab_bar()
+
+
         self.maincontroller.setWindowTitle("Universal Radio Hacker [" + path + "]")
 
         self.project_loaded_status_changed.emit(self.project_loaded)
@@ -157,9 +156,9 @@ class ProjectManager(QObject):
 
     def convert_folder_to_project(self):
         self.project_file = os.path.join(self.project_path, constants.PROJECT_FILE)
-        self.maincontroller.on_project_settings_clicked()
+        self.maincontroller.show_project_settings()
 
-    def write_signal_information_to_project_file(self, signal: Signal, blocks, tree=None):
+    def write_signal_information_to_project_file(self, signal: Signal, messages, tree=None):
         if self.project_file is None or signal is None or len(signal.filename) == 0:
             return
 
@@ -182,18 +181,18 @@ class ProjectManager(QObject):
         signal_tag.set("name", signal.name)
         signal_tag.set("filename", os.path.relpath(signal.filename, self.project_path))
         signal_tag.set("bit_length", str(signal.bit_len))
-        signal_tag.set("zero_treshold", str(signal.qad_center))
+        signal_tag.set("qad_center", str(signal.qad_center))
         signal_tag.set("tolerance", str(signal.tolerance))
-        signal_tag.set("noise_treshold", str(signal.noise_treshold))
+        signal_tag.set("noise_threshold", str(signal.noise_threshold))
         signal_tag.set("noise_minimum", str(signal.noise_min_plot))
         signal_tag.set("noise_maximum", str(signal.noise_max_plot))
         signal_tag.set("auto_detect_on_modulation_changed", str(signal.auto_detect_on_modulation_changed))
         signal_tag.set("modulation_type", str(signal.modulation_type))
         signal_tag.set("sample_rate", str(signal.sample_rate))
 
-        blocks_tag = ET.SubElement(signal_tag, "blocks")
-        for block in blocks:
-            blocks_tag.append(block.to_xml())
+        messages = ET.SubElement(signal_tag, "messages")
+        for message in messages:
+            messages.append(message.to_xml())
 
         tree.write(self.project_file)
 
@@ -213,16 +212,8 @@ class ProjectManager(QObject):
         for mod_tag in root.findall("modulator"):
             root.remove(mod_tag)
 
-        for mod in modulators:
-            mod_tag = ET.SubElement(root, "modulator")
-            mod_tag.set("name", mod.name)
-            mod_tag.set("carrier_freq_hz", str(mod.carrier_freq_hz))
-            mod_tag.set("carrier_phase_deg", str(mod.carrier_phase_deg))
-            mod_tag.set("carrier_amplitude", str(mod.carrier_amplitude))
-            mod_tag.set("modulation_type", str(mod.modulation_type))
-            mod_tag.set("sample_rate", str(mod.sample_rate))
-            mod_tag.set("param_for_one", str(mod.param_for_one))
-            mod_tag.set("param_for_zero", str(mod.param_for_zero))
+        for i, mod in enumerate(modulators):
+            root.append(mod.to_xml(i))
 
         tree.write(self.project_file)
 
@@ -238,15 +229,7 @@ class ProjectManager(QObject):
 
         result = []
         for mod_tag in root.iter("modulator"):
-            mod = Modulator(mod_tag.attrib["name"])
-            mod.carrier_freq_hz = float(mod_tag.attrib["carrier_freq_hz"])
-            mod.carrier_amplitude = float(mod_tag.attrib["carrier_amplitude"])
-            mod.carrier_phase_deg = float(mod_tag.attrib["carrier_phase_deg"])
-            mod.modulation_type = int(mod_tag.attrib["modulation_type"])
-            mod.sample_rate = float(mod_tag.attrib["sample_rate"])
-            mod.param_for_one = float(mod_tag.attrib["param_for_one"])
-            mod.param_for_zero = float(mod_tag.attrib["param_for_zero"])
-            result.append(mod)
+            result.append(Modulator.from_xml(mod_tag))
 
         return result
 
@@ -270,14 +253,12 @@ class ProjectManager(QObject):
         root.set("bandwidth", str(self.bandwidth))
         root.set("gain", str(self.gain))
         root.set("description", str(self.description).replace("\n",self.NEWLINE_CODE))
-
-        parts_tag = ET.SubElement(root, "participants")
-        for parti in self.participants:
-            parts_tag.append(parti.to_xml())
+        root.set("collapse_project_tabs", str(int(not self.maincontroller.ui.tabParticipants.isVisible())))
+        root.set("broadcast_address_hex", str(self.broadcast_address_hex))
 
         open_files = []
         for i, sf in enumerate(self.maincontroller.signal_tab_controller.signal_frames):
-            self.write_signal_information_to_project_file(sf.signal, sf.proto_analyzer.blocks, tree=tree)
+            self.write_signal_information_to_project_file(sf.signal, sf.proto_analyzer.messages, tree=tree)
             try:
                 pf = self.maincontroller.signal_protocol_dict[sf]
                 filename = pf.filename
@@ -307,13 +288,6 @@ class ProjectManager(QObject):
             group_tag.set("name", str(group.name))
             group_tag.set("id", str(i))
 
-            # TODO Remove as decoding will be blockwise
-            try:
-                decoding_index = cfc.decodings.index(group.decoding)
-            except ValueError:
-                decoding_index = 0
-            group_tag.set("decoding_index", str(decoding_index))
-
             for proto_frame in cfc.protocols[i]:
                 if proto_frame.filename:
                     proto_tag = ET.SubElement(group_tag, "cf_protocol")
@@ -321,11 +295,7 @@ class ProjectManager(QObject):
                     show = "1" if proto_frame.show else "0"
                     proto_tag.set("show", show)
 
-        root.append(cfc.proto_analyzer.to_xml(decoders=cfc.decodings))
-
-        labelsets_tag = ET.SubElement(root, "labelsets")
-        for labelset in cfc.proto_analyzer.labelsets:
-            labelsets_tag.append(labelset.to_xml())
+        root.append(cfc.proto_analyzer.to_xml_tag(decodings=cfc.decodings, participants=self.participants))
 
         xmlstr = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
         with open(self.project_file, "w") as f:
@@ -333,23 +303,7 @@ class ProjectManager(QObject):
                 if line.strip():
                     f.write(line+"\n")
 
-    def read_decodings(self) -> dict:
-        if self.project_file is None:
-            return
-
-        tree = ET.parse(self.project_file)
-        root = tree.getroot()
-        decodings = {}
-        for group_tag in root.iter("group"):
-            id = group_tag.attrib["id"]
-            try:
-                decodings[int(id)] = int(group_tag.attrib["decoding_index"])
-            except KeyError:
-                decodings[int(id)] = 0
-
-        return decodings
-
-    def read_participants_for_signal(self, signal: Signal, blocks):
+    def read_participants_for_signal(self, signal: Signal, messages):
         if self.project_file is None or len(signal.filename) == 0:
             return False
 
@@ -358,15 +312,18 @@ class ProjectManager(QObject):
 
         for sig_tag in root.iter("signal"):
             if sig_tag.attrib["filename"] == os.path.relpath(signal.filename, self.project_path):
-                blocks_tag = sig_tag.find("blocks")
-                if blocks_tag:
-                    for i, block_tag in enumerate(blocks_tag.iter("block")):
-                        blocks[i].from_xml(block_tag, self.participants)
+                messages_tag = sig_tag.find("messages")
+
+                try:
+                    if messages_tag:
+                        for i, message_tag in enumerate(messages_tag.iter("message")):
+                            messages[i].from_xml(message_tag, self.participants)
+                except IndexError:
+                    return False
+
                 return True
 
         return False
-
-
 
     def read_project_file_for_signal(self, signal: Signal):
         if self.project_file is None or len(signal.filename) == 0:
@@ -378,20 +335,16 @@ class ProjectManager(QObject):
             if sig_tag.attrib["filename"] == os.path.relpath(signal.filename,
                                                              self.project_path):
                 signal.name = sig_tag.attrib["name"]
-                signal.qad_center = float(sig_tag.attrib["zero_treshold"])
-                signal.tolerance = int(sig_tag.attrib["tolerance"])
+                signal.qad_center = float(sig_tag.get("qad_center", 0))
+                signal.tolerance = int(sig_tag.get("tolerance", 5))
                 signal.auto_detect_on_modulation_changed = False if \
                 sig_tag.attrib[
                                                                         "auto_detect_on_modulation_changed"] == 'False' else True
 
-                signal.noise_treshold = float(sig_tag.attrib["noise_treshold"])
-                try:
-                    signal.sample_rate = float(sig_tag.attrib["sample_rate"])
-                except KeyError:
-                    pass  # For old project files
-
-                signal.bit_len = int(sig_tag.attrib["bit_length"])
-                signal.modulation_type = int(sig_tag.attrib["modulation_type"])
+                signal.noise_threshold = float(sig_tag.get("noise_threshold", 0.1))
+                signal.sample_rate = float(sig_tag.get("sample_rate", 1e6))
+                signal.bit_len = int(sig_tag.get("bit_length", 100))
+                signal.modulation_type = int(sig_tag.get("modulation_type", 0))
                 break
 
         return True
@@ -446,13 +399,15 @@ class ProjectManager(QObject):
         self.maincontroller.compare_frame_controller.refresh()
 
     def from_dialog(self, dialog):
-        if dialog.commited:
+        if dialog.committed:
             if dialog.new_project or not os.path.isfile(os.path.join(dialog.path, constants.PROJECT_FILE)):
                 self.set_project_folder(dialog.path, ask_for_new_project=False)
             self.frequency = dialog.freq
             self.sample_rate = dialog.sample_rate
             self.gain = dialog.gain
             self.bandwidth = dialog.bandwidth
-            self.description  = dialog.description
-            self.participants = dialog.participants
+            self.description = dialog.description
+            self.broadcast_address_hex = dialog.broadcast_address_hex.lower().replace(" ", "")
+            if dialog.new_project:
+                self.participants = dialog.participants
             self.project_updated.emit()

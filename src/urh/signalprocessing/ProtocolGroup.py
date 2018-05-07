@@ -1,26 +1,15 @@
-from urh.signalprocessing.encoding import encoding
+from urh.signalprocessing.encoder import Encoder
 from urh.signalprocessing.ProtocolAnalyzer import ProtocolAnalyzer
-from urh.signalprocessing.ProtocolBlock import ProtocolBlock
+from urh.signalprocessing.Message import Message
 
 
 class ProtocolGroup(object):
-    def __init__(self, name: str, decoding: encoding = encoding(["Non Return To Zero (NRZ)"])):
+    __slots__ = ["name", "__items", "loaded_from_file"]
+
+    def __init__(self, name: str):
         self.name = name
-        self.__decoding = decoding
         self.__items = []
-
         self.loaded_from_file = False
-
-    @property
-    def decoding(self) -> encoding:
-        return self.__decoding
-
-    @decoding.setter
-    def decoding(self, val:encoding):
-        if self.decoding != val:
-            self.__decoding = val
-            for proto in self.protocols:
-                proto.set_decoder_for_blocks(self.decoding)
 
     @property
     def items(self):
@@ -35,8 +24,8 @@ class ProtocolGroup(object):
         return len(self.items)
 
     @property
-    def num_blocks(self):
-        return sum(p.num_blocks for p in self.protocols)
+    def num_messages(self):
+        return sum(p.num_messages for p in self.protocols)
 
     @property
     def all_protocols(self):
@@ -55,14 +44,14 @@ class ProtocolGroup(object):
         return [proto for proto in self.all_protocols if proto.show]
 
     @property
-    def blocks(self):
+    def messages(self):
         """
 
-        :rtype: list of ProtocolBlock
+        :rtype: list of Message
         """
         result = []
         for proto in self.protocols:
-            result.extend(proto.blocks)
+            result.extend(proto.messages)
         return result
 
     @property
@@ -95,11 +84,7 @@ class ProtocolGroup(object):
             return None
 
     def __repr__(self):
-        return "{0} ({1})".format(self.name, self.decoding.name)
-
-    def set_labels(self, val):
-        self.__labels = val # For AmbleAssignPlugin
-
+        return "Group: {0}".format(self.name)
 
     def add_protocol_item(self, protocol_item):
         """

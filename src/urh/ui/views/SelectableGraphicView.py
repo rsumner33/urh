@@ -1,8 +1,10 @@
 from PyQt5.QtCore import QRectF, pyqtSignal, Qt, QPoint
 from PyQt5.QtGui import QMouseEvent, QKeyEvent
+from PyQt5.QtGui import QPainter
 from PyQt5.QtWidgets import QGraphicsView
 
 from urh import constants
+from urh.SceneManager import SceneManager
 from urh.ui.ROI import ROI
 from urh.ui.ZoomableScene import ZoomableScene
 
@@ -17,24 +19,20 @@ class SelectableGraphicView(QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.scene_creator = None
-        """:type: SceneManager """
+        self.setResizeAnchor(QGraphicsView.NoAnchor)
+        self.setTransformationAnchor(QGraphicsView.NoAnchor)
+        self.setRenderHints(QPainter.Antialiasing)
 
-        self.mouse_press_pos = None
-        """:type: QPoint """
-
-        self.mouse_pos = None
-        """:type: QPoint """
-
-        self.grab_start = None
-        """:type: QPoint"""
+        self.scene_manager = None  # type: SceneManager
+        self.mouse_press_pos = None  # type: QPoint
+        self.mouse_pos = None  # type: QPoint
+        self.grab_start = None  # type: QPoint
 
         self.xmove = 0
 
         self.separation_area_moving = False
 
-        self.shift_mode = False # Shift Key currently pressed?
-        self.ctrl_mode = False # Ctrl Key currently pressed?
+        self.shift_mode = False  # Shift Key currently pressed?
 
     def scene(self) -> ZoomableScene:
         return super().scene()
@@ -49,7 +47,7 @@ class SelectableGraphicView(QGraphicsView):
 
     @property
     def hold_shift_to_drag(self) -> bool:
-        return constants.SETTINGS.value('hold_shift_to_drag', type=bool)
+        return constants.SETTINGS.value('hold_shift_to_drag', False, type=bool)
 
     def is_pos_in_separea(self, pos: QPoint):
         """
@@ -73,6 +71,8 @@ class SelectableGraphicView(QGraphicsView):
                 self.unsetCursor()
                 self.grab_start = None
 
+        super().keyPressEvent(event)
+
     def keyReleaseEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Shift:
             self.shift_mode = False
@@ -84,13 +84,15 @@ class SelectableGraphicView(QGraphicsView):
             else:
                 self.setCursor(Qt.OpenHandCursor)
 
+        super().keyPressEvent(event)
+
     def mousePressEvent(self, event: QMouseEvent):
         if self.scene() is None:
             return
 
         cursor = self.cursor().shape()
         has_shift_modifier = event.modifiers() == Qt.ShiftModifier
-        is_in_shift_mode = (has_shift_modifier and self.hold_shift_to_drag)\
+        is_in_shift_mode = (has_shift_modifier and self.hold_shift_to_drag) \
                            or (not has_shift_modifier and not self.hold_shift_to_drag) \
                               and cursor != Qt.SplitHCursor and cursor != Qt.SplitVCursor
 
@@ -215,11 +217,8 @@ class SelectableGraphicView(QGraphicsView):
 
         self.selection_area.finished = True
         self.selection_area.resizing = False
-        if not self.ctrl_mode:
-            self.unsetCursor()
         self.emit_sel_area_width_changed()
         self.sel_area_start_end_changed.emit(self.selection_area.start, self.selection_area.end)
-
 
     def set_selection_area(self, x=None, w=None):
         self.selection_area.setY(self.view_rect().y())
@@ -251,6 +250,6 @@ class SelectableGraphicView(QGraphicsView):
         """
         Return the boundaries of the view in scene coordinates
         """
-        topLeft = self.mapToScene(0, 0)
-        bottomRight = self.mapToScene(self.viewport().width() - 1, self.viewport().height() - 1 )
-        return QRectF(topLeft, bottomRight)
+        top_left = self.mapToScene(0, 0)
+        bottom_right = self.mapToScene(self.viewport().width() - 1, self.viewport().height() - 1)
+        return QRectF(top_left, bottom_right)

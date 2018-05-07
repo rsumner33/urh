@@ -5,14 +5,10 @@ import tempfile
 import wave
 import zipfile
 
+import numpy as np
 from PyQt5.QtCore import QDir
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
-from urh.cythonext.signalFunctions import Symbol
-
-from urh.signalprocessing.LabelSet import LabelSet
-from urh.signalprocessing.ProtocoLabel import ProtocolLabel
-from urh.signalprocessing.ProtocolBlock import ProtocolBlock
 from urh.util.Errors import Errors
 
 VIEW_TYPES = ["Bits", "Hex", "ASCII"]
@@ -22,142 +18,6 @@ archives = {}
    :param: archives[extracted_filename] = filename"""
 
 RECENT_PATH = QDir.homePath()
-
-
-def save_protocol(filename: str, viewtype: int, groups, decoding_names: list, symbols):
-    """
-    :type symbols: set of Symbol
-    :type groups: list of ProtocolGroup
-    :type proto_labels: list of ProtocolLabel
-    :return:
-    """
-    if not filename.endswith(".txt"):
-        filename += ".txt"
-    with open(filename, mode="w") as f:
-        f.write("# Viewtype of Protocol\n")
-        f.write("# Possible Values: {0}\n".format(", ".join(VIEW_TYPES)))
-        f.write("\n")
-        f.write("VIEWTYPE = {0}\n".format(VIEW_TYPES[viewtype]))
-        if len(symbols) > 0:
-            f.write("SYMBOLS: \n")
-        for s in symbols:
-            f.write("- {0} {1:d} {2:d} {3:d}\n".format(s.name, s.nbits, s.pulsetype, s.nsamples))
-        f.write("\n\n")
-
-        for group in groups:
-            f.write("GROUPNAME = {0}\n".format(group.name) )
-            f.write("# Encodingindex for Group\n")
-            f.write("# Possible Encodings: {0}\n".format(", ".join(decoding_names)))
-            f.write("\n")
-            f.write("ENCODING = {0:d}\n".format(decoding_names.index(group.decoding.name)))
-            f.write("\n\n")
-
-            f.write("PROTOCOL:\n\n")
-            f.write("\n".join(group.decoded_bits_str))
-
-            f.write("\n\n\nPROTOCOL-LABELS:")
-            for label in group.labels:
-                f.write("\n\n")
-                f.write("Name: {0}\n".format(label.name))
-                f.write("Bits: {0}-{1}\n".format(label.start+1, label.end))
-                f.write("DO NOT CHANGE NEXT LINE:\n")
-                f.write("Applies for Blocks: {0}\n".format(", ".join(map(str, label.block_numbers))))
-                f.write("Apply Decoding: {0}\n".format(label.apply_decoding))
-            f.write("\n\n")
-
-def read_protocol(filename: str):
-    if not os.path.isfile(filename):
-        raise FileNotFoundError("{0} could not be found".format(filename))
-
-    with open(filename, mode="r") as f:
-        viewtype = 0
-        reading_proto = False
-        reading_labels = False
-        reading_symbols = False
-        label_name = None
-        label_start = label_end = label_ref_block = -1
-        label_blocks = None
-        apply_decoding = None
-        symbols = dict()
-        cur_group = -1
-        groups = []
-        for line in f:
-            line = line.strip()
-            line = line.strip("\n")
-            if line.startswith("#") or len(line) == 0:
-                continue
-            elif line.startswith("VIEWTYPE"):
-                _, viewtype_str = line.split("=")
-                viewtype_str = viewtype_str.strip()
-                if viewtype_str not in VIEW_TYPES:
-                    raise SyntaxError("Unknown Viewtype {0} in file {1}".format(viewtype_str, filename))
-                else:
-                    viewtype = VIEW_TYPES.index(viewtype_str)
-            elif line.startswith("GROUPNAME"):
-                _, name = line.split("=")
-                cur_group += 1
-                groups.append({})
-                groups[cur_group]["name"] = name.strip()
-                groups[cur_group]["blocks"] = []
-                groups[cur_group]["labels"] = []
-            elif line.startswith("ENCODING"):
-                _, encoding_str = line.split("=")
-                encoding_str = encoding_str.strip()
-                decoding = int(encoding_str)
-                groups[cur_group]["decoding_index"] = decoding
-            elif line.startswith("SYMBOLS:"):
-                reading_symbols = True
-                reading_labels = False
-                reading_proto = False
-            elif line.startswith("PROTOCOL:"):
-                reading_proto = True
-                reading_symbols = False
-                reading_labels = False
-            elif line.startswith("PROTOCOL-LABELS:"):
-                reading_proto = False
-                reading_symbols = False
-                reading_labels = True
-            elif reading_symbols and line.startswith("-"):
-                try:
-                    _, symbol_name, nbits, pulsetype, nsamples = line.split(" ")
-                    symbols[symbol_name] = Symbol(symbol_name, int(nbits), int(pulsetype),
-                                                  int(nsamples))
-                except ValueError:
-                    continue
-            elif reading_proto and len(line) > 0:
-                groups[cur_group]["blocks"].append(ProtocolBlock.from_plain_bits_str(line, symbols))
-            elif reading_labels and line.startswith("Name"):
-                label_name = line.replace("Name: ","")
-            elif reading_labels and line.startswith("Bits"):
-                label_start, label_end = map(int, line.replace("Bits: ", "").split("-"))
-                label_start -= 1
-                label_end -= 1
-            elif reading_labels and line.startswith("Reference Block"):
-                label_ref_block = int(line.replace("Reference Block: ", "")) - 1
-            elif reading_labels and line.startswith("Applies for Blocks: "):
-                label_blocks = list(map(int, line.replace("Applies for Blocks: ", "").split(",")))
-            elif reading_labels and line.startswith("Apply Decoding: "):
-                apply_decoding = False if line.replace("Apply Decoding: ", "") == "False" else True
-
-
-            if label_name is not None and label_start >= 0 and label_end >= 0\
-                    and label_ref_block >= 0 and label_blocks is not None and apply_decoding is not None:
-                color_index = len(groups[cur_group]["labels"])
-                proto_label = ProtocolLabel(name=label_name, start=label_start, end=label_end,
-                                            val_type_index=0, color_index=color_index)
-                proto_label.block_numbers = label_blocks[:]
-                proto_label.apply_decoding = apply_decoding
-                groups[cur_group]["labels"].append(proto_label)
-
-                label_name = None
-                label_start = label_end = label_ref_block = -1
-                label_blocks = None
-
-        if len(groups) == 0:
-            raise SyntaxError("Did not find a PROTOCOL in file " + filename)
-
-        return viewtype, groups, set(symbols.values())
-
 
 def uncompress_archives(filenames, temp_dir):
     """
@@ -197,13 +57,13 @@ def uncompress_archives(filenames, temp_dir):
 def get_save_file_name(initial_name: str, wav_only=False, parent=None, caption="Save signal"):
     global RECENT_PATH
     if caption == "Save signal":
-        filter = "Complex files (*.complex);;Compressed complex files (*.coco);;wav files (*.wav);;all files (*)"
+        filter = "Complex files (*.complex);;Complex16 files (2 unsigned int8) (*.complex16u);;Complex16 files (2 signed int8) (*.complex16s);;Compressed complex files (*.coco);;wav files (*.wav);;all files (*)"
         if wav_only:
             filter = "wav files (*.wav);;all files (*)"
     elif caption == "Save fuzz profile":
         filter = "Fuzzfiles (*.fuzz);;All files (*)"
     else:
-        filter = "Textfiles (*.txt);;All files (*)"
+        filter = "Protocols (*.proto);;All files (*)"
 
     filename = None
     dialog = QFileDialog()
@@ -216,12 +76,8 @@ def get_save_file_name(initial_name: str, wav_only=False, parent=None, caption="
     dialog.setAcceptMode(QFileDialog.AcceptSave)
     dialog.selectFile(initial_name)
 
-    if (dialog.exec()):
+    if dialog.exec():
         filename = dialog.selectedFiles()[0]
-        filter = dialog.selectedNameFilter()
-        ext = filter[filter.index('*'):filter.index(')')][1:]
-        if not os.path.exists(filename) and len(ext) > 0 and not filename.endswith(ext):
-            filename += ext
 
     if filename:
         RECENT_PATH = os.path.split(filename)[0]
@@ -273,7 +129,15 @@ def save_data(data, filename: str):
 
 def save_signal(signal):
     filename = signal.filename
-    data = signal.data if not filename.endswith(".wav") else signal.wave_data
+    if filename.endswith(".wav"):
+        data = signal.wave_data
+    elif filename.endswith(".complex16u"):
+        data = (127.5 * (signal.data.view(np.float32) + 1.0)).astype(np.uint8)
+    elif filename.endswith(".complex16s"):
+        data = (127.5 * ((signal.data.view(np.float32)) - 0.5/127.5)).astype(np.int8)
+    else:
+        data = signal.data
+
     save_data(data, filename)
 
 def rewrite_zip(zipfname):

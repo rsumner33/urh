@@ -5,6 +5,7 @@ from urh import constants
 from urh.models.ProtocolTreeItem import ProtocolTreeItem
 from urh.models.TableModel import TableModel
 from urh.signalprocessing.ProtocolAnalyzerContainer import ProtocolAnalyzerContainer
+from urh.signalprocessing.encoder import Encoder
 from urh.ui.actions.Clear import Clear
 from urh.ui.actions.DeleteBitsAndPauses import DeleteBitsAndPauses
 from urh.ui.actions.InsertBitsAndPauses import InsertBitsAndPauses
@@ -13,11 +14,13 @@ from urh.util.Logger import logger
 
 
 class GeneratorTableModel(TableModel):
-    def __init__(self, tree_root_item: ProtocolTreeItem, modulators, parent = None):
-        super().__init__(parent)
+    def __init__(self, tree_root_item: ProtocolTreeItem, modulators, decodings, parent = None):
+        super().__init__(participants=[], parent=parent)
         self.protocol = ProtocolAnalyzerContainer(modulators)
         self.tree_root_item = tree_root_item
         self.dropped_row = -1
+
+        self.decodings = decodings  # type: list[Encoder]
 
         self.cfc = None
         self.is_writeable = True
@@ -28,24 +31,25 @@ class GeneratorTableModel(TableModel):
         self.bold_fonts.clear()
         self.text_colors.clear()
         pac = self.protocol
-        for i, block in enumerate(pac.blocks):
-            if block.fuzz_created:
-                for lbl in (lbl for lbl in block.labelset if lbl.fuzz_created):
-                    for j in range(*block.get_label_range(lbl=lbl, view=self.proto_view, decode=False)):
+        assert isinstance(pac, ProtocolAnalyzerContainer)
+        for i, message in enumerate(pac.messages):
+            if message.fuzz_created:
+                for lbl in (lbl for lbl in message.message_type if lbl.fuzz_created):
+                    for j in range(*message.get_label_range(lbl=lbl, view=self.proto_view, decode=False)):
                         self.bold_fonts[i, j] = True
 
-            for lbl in block.active_fuzzing_labels:
-                for j in range(*block.get_label_range(lbl=lbl, view=self.proto_view, decode=False)):
+            for lbl in message.active_fuzzing_labels:
+                for j in range(*message.get_label_range(lbl=lbl, view=self.proto_view, decode=False)):
                     self.bold_fonts[i, j] = True
                     self.text_colors[i, j] = QColor("orange")
 
-    def delete_range(self, block_start: int, block_end: int, index_start: int, index_end: int):
-        if block_start > block_end:
-            block_start, block_end = block_end, block_start
+    def delete_range(self, msg_start: int, msg_end: int, index_start: int, index_end: int):
+        if msg_start > msg_end:
+            msg_start, msg_end = msg_end, msg_start
         if index_start > index_end:
             index_start, index_end = index_end, index_start
 
-        remove_action = DeleteBitsAndPauses(self.protocol, block_start, block_end, index_start,
+        remove_action = DeleteBitsAndPauses(self.protocol, msg_start, msg_end, index_start,
                                             index_end, self.proto_view, False)
         ########## Zugehörige Pausen löschen
         self.undo_stack.push(remove_action)
@@ -69,16 +73,19 @@ class GeneratorTableModel(TableModel):
         group_nodes = []
         file_nodes = []
         for index in indexes:
-            row, column, parent = map(int, index.split(","))
-            if parent == -1:
-                parent = self.tree_root_item
-            else:
-                parent = self.tree_root_item.child(parent)
-            node = parent.child(row)
-            if node.is_group:
-                group_nodes.append(node)
-            else:
-                file_nodes.append(node)
+            try:
+                row, column, parent = map(int, index.split(","))
+                if parent == -1:
+                    parent = self.tree_root_item
+                else:
+                    parent = self.tree_root_item.child(parent)
+                node = parent.child(row)
+                if node.is_group:
+                    group_nodes.append(node)
+                else:
+                    file_nodes.append(node)
+            except ValueError:
+                continue
 
         # Which Nodes to add?
         nodes_to_add = []
@@ -102,18 +109,21 @@ class GeneratorTableModel(TableModel):
         self.update()
 
     def get_selected_label_index(self, row: int, column: int):
+        if self.row_count == 0:
+            return -1
+
         try:
-            block = self.protocol.blocks[row]
+            msg = self.protocol.messages[row]
         except IndexError:
             logger.warning("{} is out of range for generator protocol".format(row))
             return -1
 
-        for i, lbl in enumerate(block.labelset):
-            if column in range(*block.get_label_range(lbl, self.proto_view, False)):
+        for i, lbl in enumerate(msg.message_type):
+            if column in range(*msg.get_label_range(lbl, self.proto_view, False)):
                 return i
 
         return -1
 
-    def insert_column(self, index: int):
-        insert_action = InsertColumn(self.protocol, index)
+    def insert_column(self, index: int, rows: list):
+        insert_action = InsertColumn(self.protocol, index, rows, self.proto_view)
         self.undo_stack.push(insert_action)

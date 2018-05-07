@@ -4,7 +4,7 @@ import time
 
 from urh.util.Logger import logger
 
-from urh.signalprocessing.ProtocolBlock import ProtocolBlock
+from urh.signalprocessing.Message import Message
 
 
 class PCAP(object):
@@ -22,7 +22,7 @@ class PCAP(object):
         THISZONE = 0
         SIGFIGS = 0
         SNAPLEN = 65535
-        NETWORK = 147 # TODO Find a good type: https://wiki.wireshark.org/Development/LibpcapFileFormat
+        NETWORK = 147
 
         self.reset_timestamp()
 
@@ -44,7 +44,7 @@ class PCAP(object):
     def write_packets(self, packets, filename: str, sample_rate: int):
         """
 
-        :type packets: list of ProtocolBlock
+        :type packets: list of Message
         :param filename:
         :return:
         """

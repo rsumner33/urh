@@ -5,10 +5,12 @@ import os
 import sys
 from enum import Enum
 
+
 class Backends(Enum):
     none = 0
     native = 1
     grc = 2
+    network = 3  # provided by network sdr plugin
 
 
 class BackendContainer(object):
@@ -16,7 +18,7 @@ class BackendContainer(object):
         self.name = name
         self.avail_backends = avail_backends
         settings = constants.SETTINGS
-        self.selected_backend = Backends[settings.value(name+"_selected_backend", "none")]
+        self.selected_backend = Backends[settings.value(name + "_selected_backend", "none")]
         if self.selected_backend == Backends.none:
             if Backends.native in self.avail_backends:
                 self.selected_backend = Backends.native
@@ -25,14 +27,14 @@ class BackendContainer(object):
         elif self.selected_backend not in self.avail_backends:
             self.selected_backend = Backends.none
 
-        self.is_enabled = settings.value(name+"_is_enabled", True, bool)
+        self.is_enabled = settings.value(name + "_is_enabled", True, bool)
         self.__supports_rx = supports_rx
         self.__supports_tx = supports_tx
         if len(self.avail_backends) == 0:
             self.is_enabled = False
 
     def __repr__(self):
-        return "avail backends: " +str(self.avail_backends) + "| selected backend:" + str(self.selected_backend)
+        return "avail backends: " + str(self.avail_backends) + "| selected backend:" + str(self.selected_backend)
 
     @property
     def supports_rx(self) -> bool:
@@ -63,6 +65,7 @@ class BackendContainer(object):
         settings.setValue(self.name + "_is_enabled", self.is_enabled)
         settings.setValue(self.name + "_selected_backend", self.selected_backend.name)
 
+
 class BackendHandler(object):
     """
     This class controls the devices backend.
@@ -71,15 +74,20 @@ class BackendHandler(object):
     3) Manage the selection of devices backend
 
     """
-    DEVICE_NAMES = ("HackRF", "USRP", "RTL-SDR", "FUNcube-Dongle")
+    DEVICE_NAMES = ("Bladerf", "HackRF", "USRP", "RTL-SDR", "FUNcube-Dongle")
 
-    def __init__(self):
+    def __init__(self, testing_mode=False):
+        self.testing_mode = testing_mode  # Ensure we get some device backends for unit tests
+
         self.python2_exe = constants.SETTINGS.value('python2_exe', self.__get_python2_interpreter())
-        if os.path.isfile(self.python2_exe) and os.access(self.python2_exe, os.X_OK):
-            self.gnuradio_installed = call([self.python2_exe, "-c", "import gnuradio"], stderr=DEVNULL) == 0
-        else:
-            self.gnuradio_installed = False
+        self.gnuradio_install_dir = constants.SETTINGS.value('gnuradio_install_dir', "")
+        self.use_gnuradio_install_dir = constants.SETTINGS.value('use_gnuradio_install_dir', os.name == "nt", bool)
 
+        self.gnuradio_installed = False
+        self.set_gnuradio_installed_status()
+
+        if self.testing_mode:
+            self.gnuradio_installed = True
 
         if not hasattr(sys, 'frozen'):
             self.path = os.path.dirname(os.path.realpath(__file__))
@@ -93,19 +101,40 @@ class BackendHandler(object):
 
     @property
     def __hackrf_native_enabled(self) -> bool:
-         try:
-             from urh.dev.native.lib import hackrf
-             return True
-         except ImportError:
-             return False
+        try:
+            from urh.dev.native.lib import hackrf
+            return True
+        except ImportError:
+            return False
 
     @property
     def __usrp_native_enabled(self) -> bool:
-         try:
-             from urh.dev.native.lib import uhd
-             return True
-         except ImportError:
-             return False
+        try:
+            from urh.dev.native.lib import uhd
+            return True
+        except ImportError:
+            return False
+
+    def set_gnuradio_installed_status(self):
+        if self.use_gnuradio_install_dir:
+            # We are probably on windows with a bundled gnuradio installation
+            bin_dir = os.path.join(self.gnuradio_install_dir, "bin")
+            site_packages_dir = os.path.join(self.gnuradio_install_dir, "lib", "site-packages")
+            if all(os.path.isdir(dir) for dir in [self.gnuradio_install_dir, bin_dir, site_packages_dir]):
+                constants.SETTINGS.setValue("gnuradio_install_dir", self.gnuradio_install_dir)
+                self.gnuradio_installed = True
+                return
+            else:
+                self.gnuradio_installed = False
+                return
+        else:
+            # we are on a nice unix with gnuradio installed to default python path
+            if os.path.isfile(self.python2_exe) and os.access(self.python2_exe, os.X_OK):
+                self.gnuradio_installed = call([self.python2_exe, "-c", "import gnuradio"], stderr=DEVNULL) == 0
+                constants.SETTINGS.setValue("python2_exe", self.python2_exe)
+            else:
+                self.gnuradio_installed = False
+                return
 
     def __device_has_gr_scripts(self, devname: str):
         script_path = os.path.join(self.path, "gr", "scripts")
@@ -138,7 +167,10 @@ class BackendHandler(object):
         self.device_backends.clear()
         for device_name in self.DEVICE_NAMES:
             ab, rx_suprt, tx_suprt = self.__avail_backends_for_device(device_name)
-            self.device_backends[device_name.lower()] = BackendContainer(device_name.lower(), ab, rx_suprt, tx_suprt)
+            container = BackendContainer(device_name.lower(), ab, rx_suprt, tx_suprt)
+            if self.testing_mode:
+                container.is_enabled = True
+            self.device_backends[device_name.lower()] = container
 
     def __get_python2_interpreter(self):
         paths = os.get_exec_path()
@@ -150,6 +182,7 @@ class BackendHandler(object):
                     return attempt
 
         return ""
+
 
 if __name__ == "__main__":
     bh = BackendHandler()

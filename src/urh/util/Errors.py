@@ -1,3 +1,4 @@
+import sys
 from PyQt5.QtWidgets import QMessageBox, QWidget
 
 
@@ -39,13 +40,20 @@ class Errors:
     @staticmethod
     def hackrf_not_found():
         w = QWidget()
+
+        if sys.platform == "win32":
+            msg = "Could not connect to HackRF. Try these solutions:" \
+                                           "<br/><br/> 1. Ensure HackRF is plugged in." \
+                                           "<br/> 2. <b>Install HackRF USB driver</b> with <a href='http://zadig.akeo.ie/'>Zadig</a>."
+        else:
+            msg = "Could not connect to HackRF. Try these solutions:" \
+                                           "<br/><br/> 1. Ensure HackRF is plugged in." \
+                                           "<br/> 2. Run the command <b>hackrf_info</b> in terminal as root." \
+                                           "<br/> 3. If 2. works for you, follow the instructions "\
+                                           "<a href='https://github.com/mossmann/hackrf/wiki/FAQ'>here</a>."\
+
         QMessageBox.critical(w, w.tr("HackRF not found"),
-                             w.tr("Could not connect to HackRF. Try these "
-                                  "solutions:"
-                                       "<br/><br/> 1. Ensure HackRF is plugged in."
-                                       "<br/> 2. Run the command <b>hackrf_info</b> in terminal as root."
-                                       "<br/> 3. If 2. works for you, follow the instructions "
-                                       "<a href='https://github.com/mossmann/hackrf/wiki/FAQ'>here</a>."))
+                             w.tr(msg))
 
     @staticmethod
     def gnuradio_not_installed():
@@ -65,3 +73,9 @@ class Errors:
         w = QWidget()
         QMessageBox.critical(w, w.tr("Invalid Path"),
                              w.tr("The path {0} is invalid.".format(path)))
+
+    @staticmethod
+    def network_sdr_send_is_elsewhere():
+        w = QWidget()
+        QMessageBox.information(w, "This feature is elsewhere", "You can send your data with the network SDR by "
+                                                                   "using the button below the generator table.")

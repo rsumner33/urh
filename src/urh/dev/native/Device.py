@@ -7,6 +7,7 @@ from abc import abstractmethod
 
 import time
 
+import psutil
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from urh.util.Formatter import Formatter
@@ -16,7 +17,7 @@ class Device(QObject):
     BYTES_PER_SAMPLE = None
     rcv_index_changed = pyqtSignal(int, int)
 
-    def __init__(self, bw, freq, gain, srate, bufsize=8e9, is_ringbuffer=False):
+    def __init__(self, bw, freq, gain, srate, is_ringbuffer=False):
         super().__init__()
 
         self.__bandwidth = bw
@@ -52,8 +53,6 @@ class Device(QObject):
         self.device_ip = "192.168.10.2" # For USRP
 
         self.receive_buffer = None
-        self.receive_buffer_size = bufsize
-
 
         self.spectrum_x = None
         self.spectrum_y = None
@@ -70,13 +69,13 @@ class Device(QObject):
 
     def init_recv_buffer(self):
         if self.receive_buffer is None:
-            while True:
-                try:
-                    self.receive_buffer = np.zeros(int(self.receive_buffer_size), dtype=np.complex64, order='C')
-                    break
-                except (OSError, MemoryError, ValueError):
-                    self.receive_buffer_size //= 2
-        logger.info("Initialized receiving buffer with size {0:.2f}MB".format(self.receive_buffer_size/(1024*1024)))
+            if self.is_ringbuffer:
+                nsamples = 10**5
+            else:
+                # Take 60% of avail memory
+                nsamples = 0.6*(psutil.virtual_memory().free / 8)
+            self.receive_buffer = np.zeros(int(nsamples), dtype=np.complex64, order='C')
+            logger.info("Initialized receiving buffer with size {0:.2f}MB".format(self.receive_buffer.nbytes / (1024 * 1024)))
 
     def log_retcode(self, retcode: int, action: str, msg=""):
         msg = str(msg)
@@ -214,19 +213,19 @@ class Device(QObject):
         pass
 
     @abstractmethod
-    def start_tx_mode(self, samples_to_send: np.ndarray = None, repeats=None):
+    def start_tx_mode(self, samples_to_send: np.ndarray = None, repeats=None, resume=False):
         pass
 
     @abstractmethod
     def stop_tx_mode(self, msg):
         pass
 
-    @abstractmethod
-    def unpack_complex(self, buffer, nvalues):
+    @staticmethod
+    def unpack_complex(buffer, nvalues):
         pass
 
-    @abstractmethod
-    def pack_complex(self, complex_samples: np.ndarray):
+    @staticmethod
+    def pack_complex(complex_samples: np.ndarray):
         pass
 
     def set_device_parameters(self):
@@ -240,7 +239,6 @@ class Device(QObject):
             try:
                 while not self.queue.empty():
                     byte_buffer = self.queue.get()
-                    old_index = self.current_recv_index
 
                     nsamples = len(byte_buffer) // self.BYTES_PER_SAMPLE
                     if nsamples > 0:
@@ -248,16 +246,18 @@ class Device(QObject):
                             if self.is_ringbuffer:
                                 self.current_recv_index = 0
                                 if nsamples >= len(self.receive_buffer):
-                                   # logger.warning("Receive buffer too small, skipping {0:d} samples".format(nsamples-len(self.receive_buffer)))
+                                    logger.warning("Receive buffer too small, skipping {0:d} samples".format(nsamples-len(self.receive_buffer)))
                                     nsamples = len(self.receive_buffer) - 1
 
                             else:
-                                self.stop_rx_mode("Receiving Buffer is full.")
+                                self.stop_rx_mode("Receiving buffer is full {0}/{1}".format(self.current_recv_index + nsamples, len(self.receive_buffer)))
                                 return
 
                         end = nsamples*self.BYTES_PER_SAMPLE
                         self.receive_buffer[self.current_recv_index:self.current_recv_index + nsamples] = \
                             self.unpack_complex(byte_buffer[:end], nsamples)
+
+                        old_index = self.current_recv_index
                         self.current_recv_index += nsamples
 
                         self.rcv_index_changed.emit(old_index, self.current_recv_index)
@@ -266,7 +266,8 @@ class Device(QObject):
 
             time.sleep(0.01)
 
-    def init_send_parameters(self, samples_to_send: np.ndarray = None, repeats: int = None, skip_device_parameters=False):
+    def init_send_parameters(self, samples_to_send: np.ndarray = None, repeats: int = None,
+                             skip_device_parameters=False, resume=False):
         if not skip_device_parameters:
             self.set_device_parameters()
 
@@ -282,41 +283,45 @@ class Device(QObject):
         if self.send_buffer is None or self.send_buffer.closed:
             self.send_buffer = io.BytesIO(self.pack_complex(self.samples_to_send))
             self.send_buffer_reader = io.BufferedReader(self.send_buffer)
-        else:
+        elif not resume:
             self.reset_send_buffer()
+            self.current_sending_repeat = 0
 
         if repeats is not None:
             self.sending_repeats = repeats
 
-        self.current_sending_repeat = 0
-        self.current_sent_sample = 0
-
     def reset_send_buffer(self):
-        self.current_sent_sample = 0
-        self.send_buffer_reader.seek(0)
+        try:
+            self.send_buffer_reader.seek(0)
+            self.current_sent_sample = 0
+        except ValueError:
+            logger.info("Send buffer was already closed. Cant reset it.")
 
     def check_send_buffer(self):
-         # sendning_repeats -1 = forever
-        assert len(self.samples_to_send) == len(self.send_buffer_reader.read()) // self.BYTES_PER_SAMPLE
-        self.send_buffer.seek(0)
-        while (self.current_sending_repeat < self.sending_repeats or self.sending_repeats == -1) and self.is_transmitting:
-                self.reset_send_buffer()
-                while self.is_transmitting and self.send_buffer_reader.peek():
-                    try:
-                        self.current_sent_sample = self.send_buffer_reader.tell() // self.BYTES_PER_SAMPLE
-                    except ValueError:
-                        # I/O operation on closed file. --> Buffer was closed
-                        break
-                    time.sleep(0.01)
+        def sending_iteration_remaining(current_sending_repeat: int, sending_repeats: int):
+            return current_sending_repeat < sending_repeats or sending_repeats == -1 # sending_repeats -1 = forever
 
-                self.current_sent_sample = self.send_buffer_reader.tell() // self.BYTES_PER_SAMPLE
-                self.current_sending_repeat += 1
+        assert len(self.samples_to_send) == len(self.send_buffer_reader.read()) // self.BYTES_PER_SAMPLE
+        self.send_buffer.seek(self.current_sent_sample * self.BYTES_PER_SAMPLE)
+
+        while sending_iteration_remaining(self.current_sending_repeat, self.sending_repeats) and self.is_transmitting:
+            while self.is_transmitting and self.send_buffer_reader.peek():
+                try:
+                    self.current_sent_sample = self.send_buffer_reader.tell() // self.BYTES_PER_SAMPLE
+                except ValueError:
+                    # I/O operation on closed file. --> Buffer was closed
+                    break
+                time.sleep(0.01)
+
+            self.current_sending_repeat += 1
+
+            if sending_iteration_remaining(self.current_sending_repeat, self.sending_repeats):
+                self.reset_send_buffer()
 
         if self.current_sent_sample >= len(self.samples_to_send) - 1:
             self.current_sent_sample = len(self.samples_to_send)  # Mark transmission as finished
         else:
-            logger.warning("Skipped {0:d} samples in sending".format(len(self.samples_to_send) - self.current_sent_sample))
-            self.current_sent_sample = len(self.samples_to_send)
+            logger.info("Skipped {0:d} samples in sending".format(len(self.samples_to_send) - self.current_sent_sample))
 
 
     def callback_recv(self, buffer):
@@ -330,4 +335,7 @@ class Device(QObject):
         try:
             return self.send_buffer_reader.read(buffer_length)
         except BrokenPipeError:
+            return b""
+        except ValueError:
+            logger.info("Receiving Thread was closed. Callback cant read queue.")
             return b""

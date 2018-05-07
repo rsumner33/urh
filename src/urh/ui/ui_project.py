@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 #
-# Created by: PyQt5 UI code generator 5.6
 #
 # WARNING! All changes made in this file will be lost!
 
@@ -10,7 +9,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 class Ui_ProjectDialog(object):
     def setupUi(self, ProjectDialog):
         ProjectDialog.setObjectName("ProjectDialog")
-        ProjectDialog.resize(641, 734)
+        ProjectDialog.resize(774, 734)
         self.verticalLayout = QtWidgets.QVBoxLayout(ProjectDialog)
         self.verticalLayout.setObjectName("verticalLayout")
         self.lNewProject = QtWidgets.QLabel(ProjectDialog)
@@ -24,10 +23,14 @@ class Ui_ProjectDialog(object):
         self.lblName = QtWidgets.QLabel(ProjectDialog)
         self.lblName.setObjectName("lblName")
         self.verticalLayout.addWidget(self.lblName)
-        spacerItem = QtWidgets.QSpacerItem(17, 37, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
+        spacerItem = QtWidgets.QSpacerItem(17, 10, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Fixed)
         self.verticalLayout.addItem(spacerItem)
         self.gridLayout = QtWidgets.QGridLayout()
         self.gridLayout.setObjectName("gridLayout")
+        self.lineEditBroadcastAddress = QtWidgets.QLineEdit(ProjectDialog)
+        self.lineEditBroadcastAddress.setInputMask("")
+        self.lineEditBroadcastAddress.setObjectName("lineEditBroadcastAddress")
+        self.gridLayout.addWidget(self.lineEditBroadcastAddress, 14, 3, 1, 1)
         self.label_8 = QtWidgets.QLabel(ProjectDialog)
         self.label_8.setAlignment(QtCore.Qt.AlignLeading|QtCore.Qt.AlignLeft|QtCore.Qt.AlignVCenter)
         self.label_8.setObjectName("label_8")
@@ -74,6 +77,7 @@ class Ui_ProjectDialog(object):
         self.spinBoxSampleRate.setDecimals(3)
         self.spinBoxSampleRate.setMinimum(0.01)
         self.spinBoxSampleRate.setMaximum(1000000000000.0)
+        self.spinBoxSampleRate.setSingleStep(0.001)
         self.spinBoxSampleRate.setProperty("value", 1000000.0)
         self.spinBoxSampleRate.setObjectName("spinBoxSampleRate")
         self.gridLayout.addWidget(self.spinBoxSampleRate, 3, 3, 1, 1)
@@ -86,6 +90,7 @@ class Ui_ProjectDialog(object):
         self.spinBoxFreq.setDecimals(3)
         self.spinBoxFreq.setMinimum(0.01)
         self.spinBoxFreq.setMaximum(1000000000000.0)
+        self.spinBoxFreq.setSingleStep(0.001)
         self.spinBoxFreq.setProperty("value", 433920000.0)
         self.spinBoxFreq.setObjectName("spinBoxFreq")
         self.gridLayout.addWidget(self.spinBoxFreq, 4, 3, 1, 1)
@@ -110,6 +115,9 @@ class Ui_ProjectDialog(object):
         self.btnRemoveParticipant.setIcon(icon)
         self.btnRemoveParticipant.setObjectName("btnRemoveParticipant")
         self.gridLayout.addWidget(self.btnRemoveParticipant, 12, 4, 1, 2)
+        self.txtEdDescription = QtWidgets.QPlainTextEdit(ProjectDialog)
+        self.txtEdDescription.setObjectName("txtEdDescription")
+        self.gridLayout.addWidget(self.txtEdDescription, 10, 3, 1, 1)
         self.label_10 = QtWidgets.QLabel(ProjectDialog)
         self.label_10.setObjectName("label_10")
         self.gridLayout.addWidget(self.label_10, 5, 0, 1, 2)
@@ -117,11 +125,10 @@ class Ui_ProjectDialog(object):
         self.spinBoxBandwidth.setDecimals(3)
         self.spinBoxBandwidth.setMinimum(1.0)
         self.spinBoxBandwidth.setMaximum(999999999999.0)
+        self.spinBoxBandwidth.setSingleStep(0.001)
+        self.spinBoxBandwidth.setProperty("value", 1000000.0)
         self.spinBoxBandwidth.setObjectName("spinBoxBandwidth")
         self.gridLayout.addWidget(self.spinBoxBandwidth, 5, 3, 1, 1)
-        self.txtEdDescription = QtWidgets.QPlainTextEdit(ProjectDialog)
-        self.txtEdDescription.setObjectName("txtEdDescription")
-        self.gridLayout.addWidget(self.txtEdDescription, 10, 3, 1, 1)
         self.spinBoxGain = QtWidgets.QSpinBox(ProjectDialog)
         self.spinBoxGain.setMinimum(1)
         self.spinBoxGain.setProperty("value", 20)
@@ -143,6 +150,9 @@ class Ui_ProjectDialog(object):
         self.tblParticipants.verticalHeader().setCascadingSectionResizes(True)
         self.tblParticipants.verticalHeader().setStretchLastSection(False)
         self.gridLayout.addWidget(self.tblParticipants, 11, 3, 3, 1)
+        self.label_4 = QtWidgets.QLabel(ProjectDialog)
+        self.label_4.setObjectName("label_4")
+        self.gridLayout.addWidget(self.label_4, 14, 0, 1, 2)
         self.verticalLayout.addLayout(self.gridLayout)
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setObjectName("horizontalLayout")
@@ -165,6 +175,8 @@ class Ui_ProjectDialog(object):
         ProjectDialog.setWindowTitle(_translate("ProjectDialog", "Create a new project"))
         self.lNewProject.setText(_translate("ProjectDialog", "New Project"))
         self.lblName.setText(_translate("ProjectDialog", "<Name>"))
+        self.lineEditBroadcastAddress.setToolTip(_translate("ProjectDialog", "<html><head/><body><p>Enter the broadcast address of your protocol in <span style=\" font-weight:600;\">hex</span>. If you do not know what to enter here, just leave the default.</p></body></html>"))
+        self.lineEditBroadcastAddress.setText(_translate("ProjectDialog", "ffff"))
         self.label_8.setText(_translate("ProjectDialog", "Description:"))
         self.lblNewPath.setText(_translate("ProjectDialog", "<html><head/><body><p><span style=\" font-style:italic;\">Note: A new directory will be created.</span></p></body></html>"))
         self.label_6.setText(_translate("ProjectDialog", "Hz"))
@@ -180,6 +192,7 @@ class Ui_ProjectDialog(object):
         self.label_10.setText(_translate("ProjectDialog", "Default bandwidth:"))
         self.label_12.setText(_translate("ProjectDialog", "Hz"))
         self.label_11.setText(_translate("ProjectDialog", "Default gain:"))
+        self.label_4.setText(_translate("ProjectDialog", "Broadcast address (hex):"))
         self.btnOK.setText(_translate("ProjectDialog", "Create new project"))
         self.btnCancel.setText(_translate("ProjectDialog", "Cancel"))
 

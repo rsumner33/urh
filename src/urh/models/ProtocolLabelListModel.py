@@ -2,55 +2,68 @@ from PyQt5.QtCore import QAbstractListModel, pyqtSignal, Qt, QModelIndex, QMimeD
 from PyQt5.QtGui import QFont
 
 from urh import constants
+from urh.signalprocessing.FieldType import FieldType
+from urh.signalprocessing.MessageType import MessageType
 from urh.signalprocessing.ProtocoLabel import ProtocolLabel
 from urh.signalprocessing.ProtocolAnalyzer import ProtocolAnalyzer
 
 
 class ProtocolLabelListModel(QAbstractListModel):
     protolabel_visibility_changed = pyqtSignal(ProtocolLabel)
+    protolabel_type_edited = pyqtSignal()
     label_removed = pyqtSignal(ProtocolLabel)
 
     def __init__(self, proto_analyzer: ProtocolAnalyzer, controller, parent=None):
         super().__init__(parent)
         self.proto_analyzer = proto_analyzer
-        self.proto_labels = controller.active_labelset
-        self.selected_labels = []
-        self.controller = controller
+        self.message_type = controller.active_message_type # type: MessageType
+
+        self.controller = controller # type: CompareFrameController
 
     def rowCount(self, QModelIndex_parent=None, *args, **kwargs):
-        return len(self.proto_labels)
+        return len(self.message_type)
 
     def update(self):
-        self.proto_labels = self.controller.active_labelset
-        self.layoutChanged.emit()
+        self.message_type = self.controller.active_message_type # type: MessageType
+        self.beginResetModel()
+        self.endResetModel()
 
 
     def data(self, index, role=Qt.DisplayRole):
         row = index.row()
-        if row >= len(self.proto_labels):
+        if row >= len(self.message_type):
             return
 
+        label = self.message_type[row]
+
+
         if role == Qt.DisplayRole:
-            return self.proto_labels[row].name
+            return label.name
         elif role == Qt.CheckStateRole:
-            return self.proto_labels[row].show
+            return label.show
         elif role == Qt.BackgroundColorRole:
-            return constants.LABEL_COLORS[self.proto_labels[row].color_index]
-        elif role == Qt.FontRole and self.proto_labels[row] in self.selected_labels:
+            return constants.LABEL_COLORS[label.color_index]
+        elif role == Qt.FontRole:
             font = QFont()
-            font.setBold(True)
+            font.setItalic(label.type is None)
             return font
 
 
     def setData(self, index: QModelIndex, value, role=Qt.DisplayRole):
         if role == Qt.CheckStateRole:
-            proto_label = self.proto_labels[index.row()]
+            proto_label = self.message_type[index.row()]
             proto_label.show = value
             self.protolabel_visibility_changed.emit(proto_label)
         elif role == Qt.EditRole:
-            if len(value) > 0:
-                proto_label = self.proto_labels[index.row()]
-                proto_label.name = value
+            proto_label = self.message_type[index.row()]
+            proto_label.name = value
+            if value in self.controller.field_types_by_caption:
+                proto_label.type = self.controller.field_types_by_caption[value]
+            else:
+                proto_label.type = None
+
+            self.protolabel_type_edited.emit()
+
         return True
 
     def showAll(self):
@@ -66,12 +79,12 @@ class ProtocolLabelListModel(QAbstractListModel):
             self.protolabel_visibility_changed.emit(label)
 
     def get_label_at(self, row):
-        return self.proto_labels[row]
+        return self.message_type[row]
 
     def delete_label_at(self, label_id: int):
         try:
-            lbl = self.proto_labels[label_id]
-            self.proto_labels.remove(lbl)
+            lbl = self.message_type[label_id]
+            self.message_type.remove(lbl)
             self.label_removed.emit(lbl)
         except IndexError:
             pass
@@ -80,9 +93,10 @@ class ProtocolLabelListModel(QAbstractListModel):
         for row in range(end, start-1, -1):
             self.delete_label_at(row)
 
-    def add_labels_to_labelset(self, start: int, end: int, labelset_id: int):
-        for lbl in self.proto_labels:
-            self.controller.proto_analyzer.labelsets[labelset_id].add_label(lbl)
+    def add_labels_to_message_type(self, start: int, end: int, message_type_id: int):
+        for lbl in self.message_type[start:end+1]:
+            self.controller.proto_analyzer.message_types[message_type_id].add_label(lbl)
+        self.controller.updateUI(resize_table=False)
 
     def flags(self, index):
         return Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable |\

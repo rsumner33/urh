@@ -1,4 +1,5 @@
 import locale
+import traceback
 
 import numpy
 from PyQt5.QtCore import Qt, pyqtSlot
@@ -8,36 +9,31 @@ from PyQt5.QtWidgets import QInputDialog, QApplication, QWidget, QUndoStack
 from urh.controller.CompareFrameController import CompareFrameController
 from urh.controller.FuzzingDialogController import FuzzingDialogController
 from urh.controller.ModulatorDialogController import ModulatorDialogController
-from urh.controller.SendRecvDialogController import SendRecvDialogController, Mode
+from urh.controller.SendDialogController import SendDialogController
 from urh.models.GeneratorListModel import GeneratorListModel
 from urh.models.GeneratorTableModel import GeneratorTableModel
 from urh.models.GeneratorTreeModel import GeneratorTreeModel
-from urh.signalprocessing.LabelSet import LabelSet
+from urh.plugins.NetworkSDRInterface.NetworkSDRInterfacePlugin import NetworkSDRInterfacePlugin
+from urh.plugins.PluginManager import PluginManager
+from urh.signalprocessing.Message import Message
+from urh.signalprocessing.MessageType import MessageType
 from urh.signalprocessing.Modulator import Modulator
 from urh.signalprocessing.ProtocoLabel import ProtocolLabel
-from urh.signalprocessing.ProtocolBlock import ProtocolBlock
-from urh.signalprocessing.encoding import encoding
+from urh.signalprocessing.ProtocolAnalyzerContainer import ProtocolAnalyzerContainer
 from urh.ui.actions.Fuzz import Fuzz
 from urh.ui.ui_generator import Ui_GeneratorTab
 from urh.util import FileOperator
 from urh.util.Errors import Errors
 from urh.util.Formatter import Formatter
-from urh.util.ProjectManager import ProjectManager
 from urh.util.Logger import logger
+from urh.util.ProjectManager import ProjectManager
 
 
 class GeneratorTabController(QWidget):
-    def __init__(self, compare_frame_controller: CompareFrameController,
-                 project_manager: ProjectManager, parent=None):
-        """
-        :type encoders: list of encoding
-        :return:
-        """
+    def __init__(self, compare_frame_controller: CompareFrameController, project_manager: ProjectManager, parent=None):
         super().__init__(parent)
         self.ui = Ui_GeneratorTab()
         self.ui.setupUi(self)
-
-        self.modulated_scene_is_locked = False
 
         self.ui.treeProtocols.setHeaderHidden(True)
         self.tree_model = GeneratorTreeModel(compare_frame_controller)
@@ -47,13 +43,17 @@ class GeneratorTabController(QWidget):
 
         self.has_default_modulation = True
 
-        self.table_model = GeneratorTableModel(compare_frame_controller.proto_tree_model.rootItem, [Modulator("Modulation")])
-        """:type: GeneratorTableModel """
+        self.table_model = GeneratorTableModel(compare_frame_controller.proto_tree_model.rootItem,
+                                               [Modulator("Modulation")], compare_frame_controller.decodings)
         self.table_model.controller = self
-        self.ui.tableBlocks.setModel(self.table_model)
+        self.ui.tableMessages.setModel(self.table_model)
 
         self.label_list_model = GeneratorListModel(None)
         self.ui.listViewProtoLabels.setModel(self.label_list_model)
+
+        self.network_sdr_button_orig_tooltip = self.ui.btnNetworkSDRSend.toolTip()
+        self.set_network_sdr_send_button_visibility()
+        self.network_sdr_plugin = NetworkSDRInterfacePlugin()
 
         self.refresh_modulators()
         self.on_selected_modulation_changed()
@@ -62,53 +62,18 @@ class GeneratorTabController(QWidget):
         self.ui.prBarGeneration.hide()
         self.create_connects(compare_frame_controller)
 
-
-    def create_connects(self, compare_frame_controller):
-        compare_frame_controller.proto_tree_model.layoutChanged.connect(self.refresh_tree)
-        self.ui.btnEditModulation.clicked.connect(self.show_modulation_dialog)
-        self.ui.cBoxModulations.currentIndexChanged.connect(self.on_selected_modulation_changed)
-        self.ui.tableBlocks.selectionModel().selectionChanged.connect(self.on_table_selection_changed)
-        self.table_model.undo_stack.indexChanged.connect(self.refresh_table)
-        self.table_model.undo_stack.indexChanged.connect(self.refresh_pause_list)
-        self.table_model.undo_stack.indexChanged.connect(self.refresh_label_list)
-        self.table_model.undo_stack.indexChanged.connect(self.refresh_estimated_time)
-        self.table_model.undo_stack.indexChanged.connect(self.set_fuzzing_ui_status)
-        self.table_model.protocol.qt_signals.line_duplicated.connect(self.refresh_pause_list)
-        self.label_list_model.protolabel_fuzzing_status_changed.connect(self.set_fuzzing_ui_status)
-        self.ui.cbViewType.currentIndexChanged.connect(self.on_view_type_changed)
-        self.ui.btnSend.clicked.connect(self.on_btn_send_clicked)
-        self.ui.btnSave.clicked.connect(self.on_btn_save_clicked)
-
-        self.label_list_model.protolabel_removed.connect(self.handle_proto_label_removed)
-
-        self.ui.lWPauses.item_edit_clicked.connect(self.edit_pause_item)
-        self.ui.lWPauses.itemSelectionChanged.connect(self.on_lWpauses_selection_changed)
-        self.ui.lWPauses.lost_focus.connect(self.on_lWPauses_lost_focus)
-        self.ui.lWPauses.doubleClicked.connect(self.on_lWPauses_double_clicked)
-        self.ui.btnGenerate.clicked.connect(self.generate_file)
-        self.ui.listViewProtoLabels.editActionTriggered.connect(self.show_fuzzing_dialog)
-        self.label_list_model.protolabel_fuzzing_status_changed.connect(self.handle_plabel_fuzzing_state_changed)
-        self.ui.btnFuzz.clicked.connect(self.on_btn_fuzzing_clicked)
-        self.ui.tableBlocks.create_fuzzing_label_clicked.connect(self.create_fuzzing_label)
-        self.ui.tableBlocks.edit_fuzzing_label_clicked.connect(self.show_fuzzing_dialog)
-        self.ui.listViewProtoLabels.selection_changed.connect(self.handle_label_selection_changed)
-        self.ui.listViewProtoLabels.edit_on_item_triggered.connect(self.show_fuzzing_dialog)
-
+    @property
+    def selected_message_index(self) -> int:
+        min_row, _, _, _ = self.ui.tableMessages.selection_range()
+        return min_row  #
 
     @property
-    def selected_block_index(self) -> int:
-        min_row, _, _, _ = self.ui.tableBlocks.selection_range()
-        return min_row#
-
-
-    @property
-    def selected_block(self) -> ProtocolBlock:
-        selected_block_index = self.selected_block_index
-        if selected_block_index == -1:
+    def selected_message(self) -> Message:
+        selected_msg_index = self.selected_message_index
+        if selected_msg_index == -1 or selected_msg_index >= len(self.table_model.protocol.messages):
             return None
 
-        return self.table_model.protocol.blocks[selected_block_index]
-
+        return self.table_model.protocol.messages[selected_msg_index]
 
     @property
     def active_groups(self):
@@ -123,27 +88,82 @@ class GeneratorTabController(QWidget):
         assert type(value) == list
         self.table_model.protocol.modulators = value
 
+    def create_connects(self, compare_frame_controller):
+        compare_frame_controller.proto_tree_model.modelReset.connect(self.refresh_tree)
+        compare_frame_controller.participant_changed.connect(self.table_model.refresh_vertical_header)
+        self.ui.btnEditModulation.clicked.connect(self.show_modulation_dialog)
+        self.ui.cBoxModulations.currentIndexChanged.connect(self.on_selected_modulation_changed)
+        self.ui.tableMessages.selectionModel().selectionChanged.connect(self.on_table_selection_changed)
+        self.ui.tableMessages.encodings_updated.connect(self.on_table_selection_changed)
+        self.table_model.undo_stack.indexChanged.connect(self.refresh_table)
+        self.table_model.undo_stack.indexChanged.connect(self.refresh_pause_list)
+        self.table_model.undo_stack.indexChanged.connect(self.refresh_label_list)
+        self.table_model.undo_stack.indexChanged.connect(self.refresh_estimated_time)
+        self.table_model.undo_stack.indexChanged.connect(self.set_fuzzing_ui_status)
+        self.table_model.protocol.qt_signals.line_duplicated.connect(self.refresh_pause_list)
+        self.label_list_model.protolabel_fuzzing_status_changed.connect(self.set_fuzzing_ui_status)
+        self.ui.cbViewType.currentIndexChanged.connect(self.on_view_type_changed)
+        self.ui.btnSend.clicked.connect(self.on_btn_send_clicked)
+        self.ui.btnSave.clicked.connect(self.on_btn_save_clicked)
+
+        self.project_manager.project_updated.connect(self.on_project_updated)
+
+        self.label_list_model.protolabel_removed.connect(self.handle_proto_label_removed)
+
+        self.ui.lWPauses.item_edit_clicked.connect(self.edit_pause_item)
+        self.ui.lWPauses.itemSelectionChanged.connect(self.on_lWpauses_selection_changed)
+        self.ui.lWPauses.lost_focus.connect(self.on_lWPauses_lost_focus)
+        self.ui.lWPauses.doubleClicked.connect(self.on_lWPauses_double_clicked)
+        self.ui.btnGenerate.clicked.connect(self.generate_file)
+        self.ui.listViewProtoLabels.editActionTriggered.connect(self.show_fuzzing_dialog)
+        self.label_list_model.protolabel_fuzzing_status_changed.connect(self.handle_plabel_fuzzing_state_changed)
+        self.ui.btnFuzz.clicked.connect(self.on_btn_fuzzing_clicked)
+        self.ui.tableMessages.create_fuzzing_label_clicked.connect(self.create_fuzzing_label)
+        self.ui.tableMessages.edit_fuzzing_label_clicked.connect(self.show_fuzzing_dialog)
+        self.ui.listViewProtoLabels.selection_changed.connect(self.handle_label_selection_changed)
+        self.ui.listViewProtoLabels.edit_on_item_triggered.connect(self.show_fuzzing_dialog)
+
+        self.ui.btnNetworkSDRSend.clicked.connect(self.on_btn_network_sdr_clicked)
+        self.network_sdr_plugin.sending_status_changed.connect(self.on_network_sdr_sending_status_changed)
+        self.network_sdr_plugin.sending_stop_requested.connect(self.on_network_sdr_sending_stop_requested)
+        self.network_sdr_plugin.current_send_message_changed.connect(self.on_network_sdr_send_message_changed)
+
     @pyqtSlot()
     def refresh_tree(self):
-        #self.tree_model.reset()
-        self.tree_model.layoutChanged.emit()
+        self.tree_model.beginResetModel()
+        self.tree_model.endResetModel()
         self.ui.treeProtocols.expandAll()
 
     @pyqtSlot()
     def refresh_table(self):
         self.table_model.update()
-        self.ui.tableBlocks.resize_columns()
+        self.ui.tableMessages.resize_columns()
         is_data_there = self.table_model.display_data is not None and len(self.table_model.display_data) > 0
         self.ui.btnSend.setEnabled(is_data_there)
         self.ui.btnGenerate.setEnabled(is_data_there)
 
     @pyqtSlot()
     def refresh_label_list(self):
-        self.label_list_model.layoutChanged.emit()
+        self.label_list_model.message = self.selected_message
+        self.label_list_model.update()
 
     @property
     def generator_undo_stack(self) -> QUndoStack:
         return self.table_model.undo_stack
+
+    @pyqtSlot()
+    def on_selected_modulation_changed(self):
+        cur_ind = self.ui.cBoxModulations.currentIndex()
+        min_row, max_row, _, _ = self.ui.tableMessages.selection_range()
+        if min_row > -1:
+            # Modulation für Selektierte Blöcke setzen
+            for row in range(min_row, max_row + 1):
+                try:
+                    self.table_model.protocol.messages[row].modulator_indx = cur_ind
+                except IndexError:
+                    continue
+
+        self.show_modulation_info()
 
     def refresh_modulators(self):
         current_index = 0
@@ -154,21 +174,6 @@ class GeneratorTabController(QWidget):
             self.ui.cBoxModulations.addItem(modulator.name)
 
         self.ui.cBoxModulations.setCurrentIndex(current_index)
-
-    @pyqtSlot()
-    def on_selected_modulation_changed(self):
-        cur_ind = self.ui.cBoxModulations.currentIndex()
-        min_row, max_row, _, _ = self.ui.tableBlocks.selection_range()
-        if min_row > -1:
-            # Modulation für Selektierte Blöcke setzen
-            for row in range(min_row, max_row + 1):
-                try:
-                    self.table_model.protocol.blocks[row].modulator_indx = cur_ind
-                except IndexError:
-                    continue
-
-
-        self.show_modulation_info()
 
     def show_modulation_info(self):
 
@@ -205,75 +210,84 @@ class GeneratorTabController(QWidget):
         self.ui.lParamForOne.setText(prefix + " for 1:")
         self.ui.lParamForOneValue.setText(cur_mod.param_for_one_str)
 
-    @pyqtSlot()
-    def show_modulation_dialog(self):
+    def prepare_modulation_dialog(self) -> (ModulatorDialogController, Message):
         preselected_index = self.ui.cBoxModulations.currentIndex()
-        min_row, max_row, start, end = self.ui.tableBlocks.selection_range()
+
+        min_row, max_row, start, end = self.ui.tableMessages.selection_range()
         if min_row > -1:
             try:
-                block = self.table_model.protocol.blocks[min_row]
-                preselected_index = block.modulator_indx
+                selected_message = self.table_model.protocol.messages[min_row]
+                preselected_index = selected_message.modulator_indx
             except IndexError:
-                block = ProtocolBlock([True, False, True, False], 0, [], LabelSet("empty"))
+                selected_message = Message([True, False, True, False], 0, [], MessageType("empty"))
         else:
-            block = ProtocolBlock([True, False, True, False], 0, [], LabelSet("empty"))
-            if len(self.table_model.protocol.blocks) > 0:
-                block.bit_len = self.table_model.protocol.blocks[0].bit_len
+            selected_message = Message([True, False, True, False], 0, [], MessageType("empty"))
+            if len(self.table_model.protocol.messages) > 0:
+                selected_message.bit_len = self.table_model.protocol.messages[0].bit_len
 
         for m in self.modulators:
             m.default_sample_rate = self.project_manager.sample_rate
 
-        c = ModulatorDialogController(self.modulators, parent = self)
-        c.ui.treeViewSignals.setModel(self.tree_model)
-        c.ui.treeViewSignals.expandAll()
-        c.ui.comboBoxCustomModulations.setCurrentIndex(preselected_index)
-        # c.ui.spinBoxBitLength.setValue(block.bit_len) Overrides Modulators value
+        modulator_dialog = ModulatorDialogController(self.modulators, parent=self)
+        modulator_dialog.ui.treeViewSignals.setModel(self.tree_model)
+        modulator_dialog.ui.treeViewSignals.expandAll()
+        modulator_dialog.ui.comboBoxCustomModulations.setCurrentIndex(preselected_index)
 
-        c.finished.connect(self.refresh_modulators)
-        c.finished.connect(self.refresh_pause_list)
-        c.show()
-        bits = block.encoded_bits_str[0:10]
-        c.original_bits = bits
-        c.ui.linEdDataBits.setText(bits)
-        c.ui.gVOriginalSignal.signal_tree_root = self.tree_model.rootItem
-        c.draw_original_signal()
-        c.ui.gVModulated.draw_full()
-        c.ui.gVData.draw_full()
-        c.ui.gVCarrier.draw_full()
+        modulator_dialog.finished.connect(self.refresh_modulators)
+        modulator_dialog.finished.connect(self.refresh_pause_list)
 
+        return modulator_dialog, selected_message
+
+    def initialize_modulation_dialog(self, bits: str, dialog: ModulatorDialogController):
+        dialog.original_bits = bits
+        dialog.ui.linEdDataBits.setText(bits)
+        dialog.ui.gVOriginalSignal.signal_tree_root = self.tree_model.rootItem
+        dialog.draw_original_signal()
+        dialog.ui.gVModulated.show_full_scene(reinitialize=True)
+        dialog.ui.gVData.show_full_scene(reinitialize=True)
+        dialog.ui.gVData.auto_fit_view()
+        dialog.ui.gVCarrier.show_full_scene(reinitialize=True)
+        dialog.ui.gVCarrier.auto_fit_view()
+
+    @pyqtSlot()
+    def show_modulation_dialog(self):
+        modulator_dialog, message = self.prepare_modulation_dialog()
+        modulator_dialog.show()
+
+        self.initialize_modulation_dialog(message.encoded_bits_str[0:10], modulator_dialog)
         self.has_default_modulation = False
 
     @pyqtSlot()
     def on_table_selection_changed(self):
-        min_row, max_row, start, end = self.ui.tableBlocks.selection_range()
+        min_row, max_row, start, end = self.ui.tableMessages.selection_range()
 
         if min_row == -1:
             self.ui.lEncodingValue.setText("-")  #
             self.ui.lEncodingValue.setToolTip("")
-            self.label_list_model.block = None
+            self.label_list_model.message = None
             return
 
         container = self.table_model.protocol
-        block = container.blocks[min_row]
-        self.label_list_model.block = block
-        decoder_name = block.decoder.name
+        message = container.messages[min_row]
+        self.label_list_model.message = message
+        decoder_name = message.decoder.name
         metrics = QFontMetrics(self.ui.lEncodingValue.font())
         elidedName = metrics.elidedText(decoder_name, Qt.ElideRight, self.ui.lEncodingValue.width())
         self.ui.lEncodingValue.setText(elidedName)
         self.ui.lEncodingValue.setToolTip(decoder_name)
         self.ui.cBoxModulations.blockSignals(True)
-        self.ui.cBoxModulations.setCurrentIndex(block.modulator_indx)
+        self.ui.cBoxModulations.setCurrentIndex(message.modulator_indx)
         self.show_modulation_info()
         self.ui.cBoxModulations.blockSignals(False)
 
     @pyqtSlot(int)
     def edit_pause_item(self, index: int):
-        block = self.table_model.protocol.blocks[index]
-        cur_len = block.pause
+        message = self.table_model.protocol.messages[index]
+        cur_len = message.pause
         new_len, ok = QInputDialog.getInt(self, self.tr("Enter new Pause Length"),
                                           self.tr("Pause Length:"), cur_len, 0)
         if ok:
-            block.pause = new_len
+            message.pause = new_len
             self.refresh_pause_list()
 
     @pyqtSlot()
@@ -287,7 +301,7 @@ class GeneratorTabController(QWidget):
         self.ui.lWPauses.clear()
         fmt_str = "Pause ({1:d}-{2:d}) <{0:d} samples ({3})>"
         for i, pause in enumerate(self.table_model.protocol.pauses):
-            sr = self.modulators[self.table_model.protocol.blocks[i].modulator_indx].sample_rate
+            sr = self.modulators[self.table_model.protocol.messages[i].modulator_indx].sample_rate
             item = fmt_str.format(pause, i + 1, i + 2, Formatter.science_time(pause / sr))
             self.ui.lWPauses.addItem(item)
 
@@ -296,20 +310,24 @@ class GeneratorTabController(QWidget):
         rows = [index.row() for index in self.ui.lWPauses.selectedIndexes()]
         if len(rows) == 0:
             return
-        self.ui.tableBlocks.show_pause_active = True
-        self.ui.tableBlocks.pause_row = rows[0]
-        self.ui.tableBlocks.viewport().update()
-        self.ui.tableBlocks.scrollTo(self.table_model.index(rows[0], 0))
+        self.ui.tableMessages.show_pause_active = True
+        self.ui.tableMessages.pause_row = rows[0]
+        self.ui.tableMessages.viewport().update()
+        self.ui.tableMessages.scrollTo(self.table_model.index(rows[0], 0))
 
     @pyqtSlot()
     def on_lWPauses_lost_focus(self):
-        self.ui.tableBlocks.show_pause_active = False
-        self.ui.tableBlocks.viewport().update()
+        self.ui.tableMessages.show_pause_active = False
+        self.ui.tableMessages.viewport().update()
 
     @pyqtSlot()
     def generate_file(self):
-        modulated_samples = self.modulate_data()
-        FileOperator.save_data_dialog("", modulated_samples, parent=self)
+        try:
+            modulated_samples = self.modulate_data()
+            FileOperator.save_data_dialog("", modulated_samples, parent=self)
+        except Exception as e:
+            Errors.generic_error(self.tr("Failed to generate data"), str(e), traceback.format_exc())
+            self.unsetCursor()
 
     def modulate_data(self):
         pos = 0
@@ -319,9 +337,9 @@ class GeneratorTabController(QWidget):
         self.ui.prBarGeneration.setValue(0)
         self.ui.prBarGeneration.setMaximum(self.table_model.row_count)
         for i in range(0, self.table_model.row_count):
-            block = container.blocks[i]
-            modulator = self.modulators[block.modulator_indx]
-            modulator.modulate(start=pos, data=block.encoded_bits, pause=block.pause)
+            message = container.messages[i]
+            modulator = self.modulators[message.modulator_indx]
+            modulator.modulate(start=pos, data=message.encoded_bits, pause=message.pause)
             modulated_samples.append(modulator.modulated_samples)
             pos += len(modulator.modulated_samples)
             self.ui.prBarGeneration.setValue(i + 1)
@@ -333,9 +351,9 @@ class GeneratorTabController(QWidget):
     @pyqtSlot(int)
     def show_fuzzing_dialog(self, label_index: int):
         view = self.ui.cbViewType.currentIndex()
-        if self.selected_block is not None:
+        if self.selected_message is not None:
             fdc = FuzzingDialogController(protocol=self.table_model.protocol, label_index=label_index,
-                                          block_index=self.selected_block_index, proto_view=view, parent=self)
+                                          msg_index=self.selected_message_index, proto_view=view, parent=self)
             fdc.show()
             fdc.finished.connect(self.refresh_label_list)
             fdc.finished.connect(self.refresh_table)
@@ -344,7 +362,7 @@ class GeneratorTabController(QWidget):
     @pyqtSlot()
     def handle_plabel_fuzzing_state_changed(self):
         self.refresh_table()
-        self.label_list_model.layoutChanged.emit()
+        self.label_list_model.update()
 
     @pyqtSlot(ProtocolLabel)
     def handle_proto_label_removed(self, plabel: ProtocolLabel):
@@ -367,7 +385,9 @@ class GeneratorTabController(QWidget):
     def set_fuzzing_ui_status(self):
         btn_was_enabled = self.ui.btnFuzz.isEnabled()
         pac = self.table_model.protocol
-        self.ui.btnFuzz.setEnabled(len(pac.active_fuzzing_labels) > 0)
+        assert isinstance(pac, ProtocolAnalyzerContainer)
+        fuzz_active = any(lbl.active_fuzzing for msg in pac.messages for lbl in msg.message_type)
+        self.ui.btnFuzz.setEnabled(fuzz_active)
         if self.ui.btnFuzz.isEnabled() and not btn_was_enabled:
             font = self.ui.btnFuzz.font()
             font.setBold(True)
@@ -378,31 +398,52 @@ class GeneratorTabController(QWidget):
             self.ui.btnFuzz.setFont(font)
             self.ui.btnFuzz.setStyleSheet("")
 
-        has_same_block = pac.multiple_fuzz_labels_per_block
-        self.ui.rBSuccessive.setEnabled(has_same_block)
-        self.ui.rBExhaustive.setEnabled(has_same_block)
-        self.ui.rbConcurrent.setEnabled(has_same_block)
+        has_same_message = pac.multiple_fuzz_labels_per_message
+        self.ui.rBSuccessive.setEnabled(has_same_message)
+        self.ui.rBExhaustive.setEnabled(has_same_message)
+        self.ui.rbConcurrent.setEnabled(has_same_message)
+
+    def refresh_existing_encodings(self, encodings_from_file):
+        """
+        Refresh existing encodings for messages, when encoding was changed by user in dialog
+
+        :return:
+        """
+        update = False
+
+        for msg in self.table_model.protocol.messages:
+            i = next((i for i, d in enumerate(encodings_from_file) if d.name == msg.decoder.name), 0)
+            if msg.decoder != encodings_from_file[i]:
+                update = True
+                msg.decoder = encodings_from_file[i]
+                msg.clear_decoded_bits()
+                msg.clear_encoded_bits()
+
+        if update:
+            self.refresh_table()
+            self.refresh_estimated_time()
 
     @pyqtSlot()
     def refresh_estimated_time(self):
         c = self.table_model.protocol
-        if c.num_blocks == 0:
+        if c.num_messages == 0:
             self.ui.lEstimatedTime.setText("Estimated Time: ")
             return
 
-        avg_block_len = numpy.mean([len(block.encoded_bits) for block in c.blocks])
+        avg_msg_len = numpy.mean([len(msg.encoded_bits) for msg in c.messages])
         avg_bit_len = numpy.mean([m.samples_per_bit for m in self.modulators])
         avg_sample_rate = numpy.mean([m.sample_rate for m in self.modulators])
         pause_samples = sum(c.pauses)
-        nsamples = c.num_blocks * avg_block_len * avg_bit_len + pause_samples
+        nsamples = c.num_messages * avg_msg_len * avg_bit_len + pause_samples
 
-        self.ui.lEstimatedTime.setText(locale.format_string("Estimated Time: %.04f seconds", nsamples / avg_sample_rate))
+        self.ui.lEstimatedTime.setText(
+            locale.format_string("Estimated Time: %.04f seconds", nsamples / avg_sample_rate))
 
     @pyqtSlot(int, int, int)
-    def create_fuzzing_label(self, block_index: int, start: int, end: int):
+    def create_fuzzing_label(self, msg_index: int, start: int, end: int):
         con = self.table_model.protocol
-        start, end = con.convert_range(start, end - 1, self.ui.cbViewType.currentIndex(), 0, False, block_index)
-        lbl = con.create_fuzzing_label(start, end, block_index)
+        start, end = con.convert_range(start, end - 1, self.ui.cbViewType.currentIndex(), 0, False, msg_index)
+        lbl = con.create_fuzzing_label(start, end, msg_index)
         self.show_fuzzing_dialog(con.protocol_labels.index(lbl))
 
     @pyqtSlot()
@@ -413,17 +454,21 @@ class GeneratorTabController(QWidget):
 
         maxrow = numpy.max(rows)
 
-        label = self.table_model.protocol.protocol_labels[maxrow]
-        if label.show and self.selected_block:
-            start, end = self.selected_block.get_label_range(lbl=label, view=self.table_model.proto_view, decode=False)
+        try:
+            label = self.table_model.protocol.protocol_labels[maxrow]
+        except IndexError:
+            return
+        if label.show and self.selected_message:
+            start, end = self.selected_message.get_label_range(lbl=label, view=self.table_model.proto_view,
+                                                               decode=False)
             indx = self.table_model.index(0, int((start + end) / 2))
-            self.ui.tableBlocks.scrollTo(indx)
+            self.ui.tableMessages.scrollTo(indx)
 
     @pyqtSlot()
     def on_view_type_changed(self):
         self.table_model.proto_view = self.ui.cbViewType.currentIndex()
         self.table_model.update()
-        self.ui.tableBlocks.resize_columns()
+        self.ui.tableMessages.resize_columns()
 
     def close_all(self):
         self.tree_model.rootItem.clearChilds()
@@ -436,22 +481,26 @@ class GeneratorTabController(QWidget):
 
     @pyqtSlot()
     def on_btn_send_clicked(self):
-        modulated_data = self.modulate_data()
-        dialog = SendRecvDialogController(self.project_manager.frequency,
+        try:
+            modulated_data = self.modulate_data()
+            dialog = SendDialogController(self.project_manager.frequency,
                                           self.project_manager.sample_rate,
                                           self.project_manager.bandwidth,
                                           self.project_manager.gain,
                                           self.project_manager.device,
-                                          Mode.send, modulated_data=modulated_data,
+                                          modulated_data=modulated_data,
                                           parent=self)
-        if dialog.has_empty_device_list:
-            Errors.no_device()
-            dialog.close()
-            return
+            if dialog.has_empty_device_list:
+                Errors.no_device()
+                dialog.close()
+                return
 
-        dialog.recording_parameters.connect(self.project_manager.set_recording_parameters)
-        dialog.show()
-
+            dialog.recording_parameters.connect(self.project_manager.set_recording_parameters)
+            dialog.show()
+            dialog.graphics_view.show_full_scene(reinitialize=True)
+        except Exception as e:
+            Errors.generic_error(self.tr("Failed to generate data"), str(e), traceback.format_exc())
+            self.unsetCursor()
 
     @pyqtSlot()
     def on_btn_save_clicked(self):
@@ -470,3 +519,39 @@ class GeneratorTabController(QWidget):
             self.set_fuzzing_ui_status()
         except:
             logger.error("You done something wrong to the xml fuzzing profile.")
+
+    @pyqtSlot()
+    def on_project_updated(self):
+        self.table_model.participants = self.project_manager.participants
+        self.table_model.refresh_vertical_header()
+
+    def set_network_sdr_send_button_visibility(self):
+        is_plugin_enabled = PluginManager().is_plugin_enabled("NetworkSDRInterface")
+        self.ui.btnNetworkSDRSend.setVisible(is_plugin_enabled)
+
+    @pyqtSlot()
+    def on_btn_network_sdr_clicked(self):
+        if not self.network_sdr_plugin.is_sending:
+            messages = self.table_model.protocol.messages
+            sample_rates = [self.modulators[msg.modulator_indx].sample_rate for msg in messages]
+            self.network_sdr_plugin.start_message_sending_thread(messages, sample_rates)
+        else:
+            self.network_sdr_plugin.stop_sending_thread()
+
+    @pyqtSlot(bool)
+    def on_network_sdr_sending_status_changed(self, is_sending: bool):
+        self.ui.btnNetworkSDRSend.setChecked(is_sending)
+        self.ui.btnNetworkSDRSend.setEnabled(True)
+        self.ui.btnNetworkSDRSend.setToolTip(
+            "Sending in progress" if is_sending else self.network_sdr_button_orig_tooltip)
+        if not is_sending:
+            self.ui.tableMessages.clearSelection()
+
+    @pyqtSlot()
+    def on_network_sdr_sending_stop_requested(self):
+        self.ui.btnNetworkSDRSend.setToolTip("Stopping sending")
+        self.ui.btnNetworkSDRSend.setEnabled(False)
+
+    @pyqtSlot(int)
+    def on_network_sdr_send_message_changed(self, message_index: int):
+        self.ui.tableMessages.selectRow(message_index)

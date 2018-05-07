@@ -1,38 +1,40 @@
 import os
 import random
+import string
 
 import numpy
-from PyQt5.QtCore import pyqtSlot, QAbstractTableModel, Qt, QModelIndex
-from PyQt5.QtWidgets import QDialog, QCompleter, QDirModel, QTableWidgetItem
-from urh import constants
+from PyQt5.QtCore import QRegExp
+from PyQt5.QtCore import pyqtSlot, QAbstractTableModel, Qt, QModelIndex, pyqtSignal
+from PyQt5.QtGui import QRegExpValidator
+from PyQt5.QtWidgets import QDialog, QCompleter, QDirModel
 
-from urh.controller.SendRecvDialogController import SendRecvDialogController
-from urh.dev.VirtualDevice import Mode
+from urh import constants
+from urh.controller.SpectrumDialogController import SpectrumDialogController
 from urh.signalprocessing.Participant import Participant
 from urh.ui.delegates.ComboBoxDelegate import ComboBoxDelegate
 from urh.ui.ui_project import Ui_ProjectDialog
 from urh.util import FileOperator
 from urh.util.Errors import Errors
-
-import string
-
 from urh.util.ProjectManager import ProjectManager
 
 
 class ProjectDialogController(QDialog):
     class ProtocolParticipantModel(QAbstractTableModel):
+        participant_rssi_edited = pyqtSignal()
+
         def __init__(self, participants):
             super().__init__()
             self.participants = participants
-            self.header_labels = ["Name", "Shortname", "Color", "Address (hex)"]
+            self.header_labels = ["Name", "Shortname", "Color", "Relative RSSI", "Address (hex)"]
 
         def update(self):
-            self.layoutChanged.emit()
+            self.beginResetModel()
+            self.endResetModel()
 
-        def columnCount(self, QModelIndex_parent=None, *args, **kwargs):
+        def columnCount(self, parent: QModelIndex = None, *args, **kwargs):
             return len(self.header_labels)
 
-        def rowCount(self, QModelIndex_parent=None, *args, **kwargs):
+        def rowCount(self, parent: QModelIndex = None, *args, **kwargs):
             return len(self.participants)
 
         def headerData(self, section, orientation, role=Qt.DisplayRole):
@@ -52,6 +54,8 @@ class ProjectDialogController(QDialog):
                 elif j == 2:
                     return part.color_index
                 elif j == 3:
+                    return part.relative_rssi
+                elif j == 4:
                     return part.address_hex
 
         def setData(self, index: QModelIndex, value, role=Qt.DisplayRole):
@@ -60,16 +64,23 @@ class ProjectDialogController(QDialog):
             if i >= len(self.participants):
                 return False
 
-            parti = self.participants[i]
+            participant = self.participants[i]
 
             if j == 0:
-                parti.name = value
+                participant.name = value
             elif j == 1:
-                parti.shortname = value
+                participant.shortname = value
             elif j == 2:
-                parti.color_index = int(value)
+                participant.color_index = int(value)
             elif j == 3:
-                parti.address_hex = value
+                for other in self.participants:
+                    if other.relative_rssi == int(value):
+                        other.relative_rssi = participant.relative_rssi
+                        break
+                participant.relative_rssi = int(value)
+                self.participant_rssi_edited.emit()
+            elif j == 4:
+                participant.address_hex = value
 
             return True
 
@@ -79,18 +90,18 @@ class ProjectDialogController(QDialog):
 
             return Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsSelectable
 
-    def __init__(self, new_project=True, project_manager:ProjectManager=None, parent=None):
+    def __init__(self, new_project=True, project_manager: ProjectManager = None, parent=None):
         super().__init__(parent)
         if not new_project:
-            assert  project_manager is not None
+            assert project_manager is not None
 
         self.ui = Ui_ProjectDialog()
         self.ui.setupUi(self)
 
         if new_project:
-            self.parti_table_model = self.ProtocolParticipantModel([])
+            self.participant_table_model = self.ProtocolParticipantModel([])
         else:
-            self.parti_table_model = self.ProtocolParticipantModel(project_manager.participants)
+            self.participant_table_model = self.ProtocolParticipantModel(project_manager.participants)
 
             self.ui.spinBoxSampleRate.setValue(project_manager.sample_rate)
             self.ui.spinBoxFreq.setValue(project_manager.frequency)
@@ -98,6 +109,7 @@ class ProjectDialogController(QDialog):
             self.ui.spinBoxGain.setValue(project_manager.gain)
             self.ui.txtEdDescription.setPlainText(project_manager.description)
             self.ui.lineEdit_Path.setText(project_manager.project_path)
+            self.ui.lineEditBroadcastAddress.setText(project_manager.broadcast_address_hex)
 
             self.ui.btnSelectPath.hide()
             self.ui.lineEdit_Path.setDisabled(True)
@@ -105,24 +117,27 @@ class ProjectDialogController(QDialog):
             self.ui.lNewProject.setText("Edit project")
             self.ui.btnOK.setText("Accept")
 
-        self.ui.tblParticipants.setModel(self.parti_table_model)
+        self.ui.tblParticipants.setModel(self.participant_table_model)
         self.ui.tblParticipants.setItemDelegateForColumn(2, ComboBoxDelegate([""] * len(constants.PARTICIPANT_COLORS),
-                                                                            colors=constants.PARTICIPANT_COLORS,
-                                                                            parent=self))
+                                                                             colors=constants.PARTICIPANT_COLORS,
+                                                                             parent=self))
 
-
+        self.__set_relative_rssi_delegate()
+        "(([a-fA-F]|[0-9]){2}){3}"
+        self.ui.lineEditBroadcastAddress.setValidator(QRegExpValidator(QRegExp("([a-fA-F ]|[0-9]){,}")))
 
         self.sample_rate = self.ui.spinBoxSampleRate.value()
         self.freq = self.ui.spinBoxFreq.value()
         self.bandwidth = self.ui.spinBoxBandwidth.value()
         self.gain = self.ui.spinBoxGain.value()
         self.description = self.ui.txtEdDescription.toPlainText()
+        self.broadcast_address_hex = self.ui.lineEditBroadcastAddress.text()
 
         self.ui.btnRemoveParticipant.setDisabled(len(self.participants) <= 1)
 
         self.path = self.ui.lineEdit_Path.text()
         self.new_project = new_project
-        self.commited = False
+        self.committed = False
         self.setModal(True)
 
         completer = QCompleter()
@@ -134,8 +149,28 @@ class ProjectDialogController(QDialog):
         if new_project:
             self.ui.lineEdit_Path.setText(os.path.realpath(os.path.join(os.curdir, "new")))
 
-        self.on_path_edited()
+        self.on_line_edit_path_text_edited()
 
+        self.open_editors()
+
+    def __set_relative_rssi_delegate(self):
+        n = len(self.participants)
+        if n == 0:
+            items = []
+        elif n == 1:
+            items = ["0"]
+        else:
+            items = [str(i) for i in range(n)]
+            items[0] += " (low)"
+            items[-1] += " (high)"
+
+        for row in range(len(self.participants)):
+            self.ui.tblParticipants.closePersistentEditor(self.participant_table_model.index(row, 3))
+
+        self.ui.tblParticipants.setItemDelegateForColumn(3, ComboBoxDelegate(items, parent=self))
+
+    def __on_relative_rssi_edited(self):
+        self.__set_relative_rssi_delegate()
         self.open_editors()
 
     @property
@@ -144,41 +179,64 @@ class ProjectDialogController(QDialog):
 
         :rtype: list of Participant
         """
-        return self.parti_table_model.participants
+        return self.participant_table_model.participants
 
     def create_connects(self):
-        self.ui.spinBoxFreq.valueChanged.connect(self.on_frequency_changed)
-        self.ui.spinBoxSampleRate.valueChanged.connect(self.on_sample_rate_changed)
-        self.ui.spinBoxBandwidth.valueChanged.connect(self.on_bandwidth_changed)
-        self.ui.spinBoxGain.valueChanged.connect(self.on_gain_changed)
-        self.ui.txtEdDescription.textChanged.connect(self.on_description_changed)
+        self.ui.spinBoxFreq.valueChanged.connect(self.on_spin_box_frequency_value_changed)
+        self.ui.spinBoxSampleRate.valueChanged.connect(self.on_spin_box_sample_rate_value_changed)
+        self.ui.spinBoxBandwidth.valueChanged.connect(self.on_spin_box_bandwidth_value_changed)
+        self.ui.spinBoxGain.valueChanged.connect(self.on_spin_box_gain_value_changed)
+        self.ui.txtEdDescription.textChanged.connect(self.on_txt_edit_description_text_changed)
+        self.ui.lineEditBroadcastAddress.textEdited.connect(self.on_line_edit_broadcast_address_text_edited)
 
         self.ui.btnAddParticipant.clicked.connect(self.on_btn_add_participant_clicked)
         self.ui.btnRemoveParticipant.clicked.connect(self.on_btn_remove_participant_clicked)
 
-        self.ui.lineEdit_Path.textEdited.connect(self.on_path_edited)
+        self.ui.lineEdit_Path.textEdited.connect(self.on_line_edit_path_text_edited)
         self.ui.btnOK.clicked.connect(self.on_button_ok_clicked)
         self.ui.btnSelectPath.clicked.connect(self.on_btn_select_path_clicked)
         self.ui.lOpenSpectrumAnalyzer.linkActivated.connect(self.on_spectrum_analyzer_link_activated)
 
-    def on_sample_rate_changed(self):
-        self.sample_rate = self.ui.spinBoxSampleRate.value()
+        self.participant_table_model.participant_rssi_edited.connect(self.__on_relative_rssi_edited)
 
-    def on_frequency_changed(self):
-        self.freq = self.ui.spinBoxFreq.value()
+    def set_path(self, path):
+        self.path = path
+        self.ui.lineEdit_Path.setText(self.path)
+        name = os.path.basename(os.path.normpath(self.path))
+        self.ui.lblName.setText(name)
 
-    def on_bandwidth_changed(self):
-        self.bandwidth = self.ui.spinBoxBandwidth.value()
+        self.ui.lblNewPath.setVisible(not os.path.isdir(self.path))
 
-    def on_gain_changed(self):
-        self.gain = self.ui.spinBoxGain.value()
+    def open_editors(self):
+        for row in range(len(self.participants)):
+            self.ui.tblParticipants.openPersistentEditor(self.participant_table_model.index(row, 2))
+            self.ui.tblParticipants.openPersistentEditor(self.participant_table_model.index(row, 3))
 
-    def on_path_edited(self):
+    @pyqtSlot(float)
+    def on_spin_box_sample_rate_value_changed(self, value: float):
+        self.sample_rate = value
+
+    @pyqtSlot(float)
+    def on_spin_box_frequency_value_changed(self, value: float):
+        self.freq = value
+
+    @pyqtSlot(float)
+    def on_spin_box_bandwidth_value_changed(self, value: float):
+        self.bandwidth = value
+
+    @pyqtSlot(int)
+    def on_spin_box_gain_value_changed(self, value: int):
+        self.gain = value
+
+    @pyqtSlot()
+    def on_line_edit_path_text_edited(self):
         self.set_path(self.ui.lineEdit_Path.text())
 
-    def on_description_changed(self):
+    @pyqtSlot()
+    def on_txt_edit_description_text_changed(self):
         self.description = self.ui.txtEdDescription.toPlainText()
 
+    @pyqtSlot()
     def on_button_ok_clicked(self):
         self.path = os.path.realpath(self.path)
         if not os.path.exists(self.path):
@@ -192,41 +250,41 @@ class ProjectDialogController(QDialog):
             Errors.invalid_path(self.path)
             return
 
-        self.commited = True
+        self.committed = True
         self.close()
 
-    def set_path(self, path):
-        self.path = path
-        self.ui.lineEdit_Path.setText(self.path)
-        name = os.path.basename(os.path.normpath(self.path))
-        self.ui.lblName.setText(name)
+    @pyqtSlot(str)
+    def on_line_edit_broadcast_address_text_edited(self, value: str):
+        self.broadcast_address_hex = value
 
-        self.ui.lblNewPath.setVisible(not os.path.isdir(self.path))
-
+    @pyqtSlot()
     def on_btn_select_path_clicked(self):
         directory = FileOperator.get_directory()
         if directory:
             self.set_path(directory)
 
+    @pyqtSlot(str, str, str, str, str)
+    def set_recording_params_from_spectrum_analyzer_link(self, freq: str, sample_rate: str, bw: str, gain: str,
+                                                         dev_name: str):
+        self.ui.spinBoxFreq.setValue(float(freq))
+        self.ui.spinBoxSampleRate.setValue(float(sample_rate))
+        self.ui.spinBoxBandwidth.setValue(float(bw))
+        self.ui.spinBoxGain.setValue(int(gain))
+
     @pyqtSlot(str)
     def on_spectrum_analyzer_link_activated(self, link: str):
         if link == "open_spectrum_analyzer":
-            r = SendRecvDialogController(433.92e6, 1e6, 1e6, 20, "", Mode.spectrum, parent=self)
+            r = SpectrumDialogController(freq=self.freq, bw=self.bandwidth, samp_rate=self.sample_rate,
+                                         gain=self.gain, device="", parent=self)
             if r.has_empty_device_list:
                 Errors.no_device()
                 r.close()
                 return
 
-            r.recording_parameters.connect(self.set_params_from_spectrum_analyzer)
+            r.recording_parameters.connect(self.set_recording_params_from_spectrum_analyzer_link)
             r.show()
 
-    def set_params_from_spectrum_analyzer(self, freq: str, sample_rate: str, bw: str, gain: str, dev_name: str):
-       self.ui.spinBoxFreq.setValue(float(freq))
-       self.ui.spinBoxSampleRate.setValue(float(sample_rate))
-       self.ui.spinBoxBandwidth.setValue(float(bw))
-       self.ui.spinBoxGain.setValue(int(gain))
-
-
+    @pyqtSlot()
     def on_btn_add_participant_clicked(self):
         used_shortnames = {p.shortname for p in self.participants}
         used_colors = set(p.color_index for p in self.participants)
@@ -236,21 +294,24 @@ class ProjectDialogController(QDialog):
         else:
             color_index = random.choice(range(len(constants.PARTICIPANT_COLORS)))
 
-        nchars = 0
+        num_chars = 0
         participant = None
         while participant is None:
-            nchars += 1
+            num_chars += 1
             for c in string.ascii_uppercase:
-                shortname = nchars * str(c)
+                shortname = num_chars * str(c)
                 if shortname not in used_shortnames:
-                    participant = Participant("Device "+shortname, shortname=shortname, color_index=color_index)
+                    participant = Participant("Device " + shortname, shortname=shortname, color_index=color_index)
                     break
 
         self.participants.append(participant)
-        self.parti_table_model.update()
+        participant.relative_rssi = len(self.participants) - 1
+        self.__set_relative_rssi_delegate()
+        self.participant_table_model.update()
         self.ui.btnRemoveParticipant.setEnabled(True)
         self.open_editors()
 
+    @pyqtSlot()
     def on_btn_remove_participant_clicked(self):
         if len(self.participants) <= 1:
             return
@@ -265,11 +326,12 @@ class ProjectDialogController(QDialog):
             # Ensure one left
             start += 1
 
-        del self.participants[start:end+1]
-        self.parti_table_model.update()
+        del self.participants[start:end + 1]
+        num_removed = (end + 1) - start
+        for participant in self.participants:
+            if participant.relative_rssi > len(self.participants) - 1:
+                participant.relative_rssi -= num_removed
+        self.__set_relative_rssi_delegate()
+        self.participant_table_model.update()
         self.ui.btnRemoveParticipant.setDisabled(len(self.participants) <= 1)
         self.open_editors()
-
-    def open_editors(self):
-        for row in range(len(self.participants)):
-            self.ui.tblParticipants.openPersistentEditor(self.parti_table_model.index(row, 2))

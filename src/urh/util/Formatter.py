@@ -5,9 +5,13 @@ import locale
 from urh.util.Logger import logger
 
 
-class Formatter():
+class Formatter:
     @staticmethod
-    def science_time(time_in_seconds: float) -> str:
+    def local_decimal_seperator():
+        return locale.localeconv()["decimal_point"]
+
+    @staticmethod
+    def science_time(time_in_seconds: float, decimals=2, append_seconds=True, remove_spaces=False) -> str:
         if time_in_seconds < 1e-6:
             suffix = "n"
             value = time_in_seconds * 1e9
@@ -21,7 +25,13 @@ class Formatter():
             suffix = ""
             value = time_in_seconds
 
-        return locale.format_string("%.2f " + suffix, value) + "s"
+        result = locale.format_string("%.{0}f ".format(decimals) + suffix, value)
+        if append_seconds:
+            result += "s"
+        if remove_spaces:
+            result = result.replace(" ", "")
+
+        return result
 
     @staticmethod
     def big_value_with_suffix(value: float, decimals=3) -> str:

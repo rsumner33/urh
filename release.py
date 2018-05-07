@@ -1,11 +1,29 @@
+import os
+import sys
 from subprocess import call, check_output
-import os, sys
+
+import pytest
+from urh import constants
+from urh.util.Logger import logger
+
+open("/tmp/urh_releasing", "w").close()
 
 script_dir = os.path.dirname(__file__) if not os.path.islink(__file__) else os.path.dirname(os.readlink(__file__))
-sys.path.append(script_dir)
+
+rc = pytest.main(["--exitfirst", "tests"])
+
+if rc != 0:
+    print(constants.color.RED + constants.color.BOLD + "Unittests failed. Abort release." + constants.color.END)
+    sys.exit(1)
+
+# -n for parallel with pytest-xdist
+rc = pytest.main(["-v", "-s", "tests/TestInstallation.py"])
+
+if rc != 0:
+    print(constants.color.BOLD + constants.color.RED + "Installation Test failed. Abort release." + constants.color.END)
+    sys.exit(1)
 
 from src.urh import version
-
 version_file = os.path.realpath(os.path.join(script_dir, "src", "urh", "version.py"))
 
 cur_version = version.VERSION
@@ -59,3 +77,13 @@ for line in fileinput.input("PKGBUILD", inplace=True):
 call("makepkg --printsrcinfo > .SRCINFO", shell=True)
 call(["git", "commit", "-am", "version "+cur_version])
 call(["git", "push"])
+
+os.remove("/tmp/urh_releasing")
+
+os.chdir(script_dir)
+rc = pytest.main(["-v", "-s", "tests/TestInstallation.py"])
+
+if rc != 0:
+    print(constants.color.BOLD + constants.color.RED + "Installation Test failed." + constants.color.END)
+else:
+    print(constants.color.BOLD + constants.color.GREEN + "Success" + constants.color.END)

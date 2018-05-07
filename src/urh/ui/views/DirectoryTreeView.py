@@ -1,4 +1,5 @@
-from PyQt5.QtGui import QContextMenuEvent
+from PyQt5.QtCore import QModelIndex
+from PyQt5.QtGui import QContextMenuEvent, QIcon
 from PyQt5.QtWidgets import QTreeView, QInputDialog, QMessageBox, QMenu
 
 
@@ -7,14 +8,12 @@ class DirectoryTreeView(QTreeView):
         super().__init__(parent)
 
     def create_directory(self):
-        index = self.model().mapToSource(self.rootIndex())
-        """:type: QModelIndex """
-
-        model = self.model().sourceModel()
+        index = self.model().mapToSource(self.rootIndex())  # type: QModelIndex
 
         if not index.isValid():
             return
 
+        model = self.model().sourceModel()
         dir_name, ok = QInputDialog.getText(self, self.tr("Create Directory"), self.tr("Directory name"))
 
         if ok and len(dir_name) > 0:
@@ -22,7 +21,7 @@ class DirectoryTreeView(QTreeView):
                 QMessageBox.information(self, self.tr("Create Directoy"), self.tr("Failed to create the directory"))
 
     def remove(self):
-        index = self.model().mapToSource(self.currentIndex())
+        index = self.model().mapToSource(self.currentIndex())  # type: QModelIndex
         if not index.isValid():
             return
 
@@ -38,13 +37,15 @@ class DirectoryTreeView(QTreeView):
 
     def contextMenuEvent(self, event: QContextMenuEvent):
         menu = QMenu(self)
-        newdirAction = menu.addAction("New Directory")
-        delAction = menu.addAction("Delete")
+        new_dir_action = menu.addAction("New Directory")
+        new_dir_action.setIcon(QIcon.fromTheme("folder"))
+        del_action = menu.addAction("Delete")
+        del_action.setIcon(QIcon.fromTheme("edit-delete"))
 
         action = menu.exec_(self.mapToGlobal(event.pos()))
 
-        if action == newdirAction:
+        if action == new_dir_action:
             self.create_directory()
 
-        elif action == delAction:
+        elif action == del_action:
             self.remove()

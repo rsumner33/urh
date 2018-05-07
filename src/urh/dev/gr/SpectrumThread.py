@@ -1,30 +1,22 @@
 import socket
-
 import numpy as np
+import time
 
 from urh.dev.gr.AbstractBaseThread import AbstractBaseThread
+from urh.util.Logger import logger
 
 
 class SpectrumThread(AbstractBaseThread):
     def __init__(self, sample_rate, freq, gain, bandwidth, ip='127.0.0.1', parent=None):
         super().__init__(sample_rate, freq, gain, bandwidth, True, ip, parent)
-        buf_size = 2 ** 16
+        buf_size = 10**5
         self.data = np.zeros(buf_size, dtype=np.complex64)
         self.x = None
         self.y = None
 
     def run(self):
         self.initalize_process()
-
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
-        while not self.isInterruptionRequested():
-            try:
-                self.socket.connect((self.ip, self.port))
-                break
-            except (ConnectionRefusedError, ConnectionResetError):
-                continue
+        self.init_recv_socket()
 
         recv = self.socket.recv
         rcvd = b""
@@ -35,6 +27,8 @@ class SpectrumThread(AbstractBaseThread):
             except ConnectionResetError:
                 self.stop("Stopped receiving, because connection was reset")
                 return
+            except OSError as e:  # https://github.com/jopohl/urh/issues/131
+                logger.warning("Error occurred", str(e))
 
             if len(rcvd) < 8:
                 self.stop("Stopped receiving, because no data transmitted anymore")

@@ -1,11 +1,9 @@
 from collections import defaultdict
 
 from PyQt5.QtCore import pyqtSignal, QModelIndex, Qt
-from PyQt5.QtGui import QColor
 
 from urh import constants
 from urh.models.TableModel import TableModel
-from urh.signalprocessing.ProtocoLabel import ProtocolLabel
 from urh.signalprocessing.ProtocolAnalyzer import ProtocolAnalyzer
 from urh.ui.actions.DeleteBitsAndPauses import DeleteBitsAndPauses
 
@@ -14,12 +12,12 @@ class ProtocolTableModel(TableModel):
     ref_index_changed = pyqtSignal(int)
 
     def __init__(self, proto_analyzer: ProtocolAnalyzer, participants, controller, parent=None):
-        super().__init__(parent)
+        super().__init__(participants=participants, parent=parent)
 
         self.controller = controller
-        self.protocol = proto_analyzer
-        self.participants = participants
+        """:type: urh.controller.CompareFrameController.CompareFrameController"""
 
+        self.protocol = proto_analyzer
         self.active_group_ids = [0]
 
     @property
@@ -37,19 +35,8 @@ class ProtocolTableModel(TableModel):
             self.update()
             self.ref_index_changed.emit(self._refindex)
 
-
-    def headerData(self, section: int, orientation, role=Qt.DisplayRole):
-        if role == Qt.DisplayRole and orientation == Qt.Vertical and self.protocol.blocks[section].participant:
-            return  "{0} ({1})".format(section + 1, self.protocol.blocks[section].participant.shortname)
-
-        if role == Qt.BackgroundColorRole and orientation == Qt.Vertical and self.protocol.blocks[section].participant:
-            return constants.PARTICIPANT_COLORS[self.protocol.blocks[section].participant.color_index]
-
-
-        return super().headerData(section, orientation, role)
-
-    def addProtoLabel(self, start, end, blocknr):
-        self.controller.add_protocol_label(start, end, blocknr, self.proto_view)
+    def addProtoLabel(self, start, end, messagenr):
+        self.controller.add_protocol_label(start=start, end=end, messagenr=messagenr, proto_view=self.proto_view)
 
     def refresh_fonts(self):
         self.bold_fonts.clear()
@@ -59,11 +46,6 @@ class ProtocolTableModel(TableModel):
                 self.bold_fonts[i, j] = True
                 self.text_colors[i, j] = constants.DIFFERENCE_CELL_COLOR
 
-        if self.proto_view == 0:
-            for j in self.protocol.bit_alignment_positions:
-                for i in range(self.row_count):
-                    self.bold_fonts[i, j] = True
-
         if self._refindex >= 0:
             for j in range(self.col_count):
                 self.text_colors[self._refindex, j] = constants.SELECTED_ROW_COLOR
@@ -72,9 +54,8 @@ class ProtocolTableModel(TableModel):
         if not self.is_writeable:
             return
 
-        del_action = DeleteBitsAndPauses(self.protocol, min_row, max_row,
-                                         start, end, self.proto_view, True,
-                                         self.controller.get_block_numbers_for_groups(),
+        del_action = DeleteBitsAndPauses(proto_analyzer=self.protocol, start_message=min_row, end_message=max_row,
+                                         start=start, end=end, view=self.proto_view, decoded=True,
                                          subprotos=self.controller.protocol_list)
         self.undo_stack.push(del_action)
 

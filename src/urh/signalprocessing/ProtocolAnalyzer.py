@@ -1,35 +1,24 @@
 import copy
-import math
 import xml.etree.ElementTree as ET
+from xml.dom import minidom
 from collections import defaultdict
 
 import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal, Qt
 
 from urh import constants
+from urh.awre.FormatFinder import FormatFinder
 from urh.cythonext import signalFunctions
 from urh.cythonext.signalFunctions import Symbol
 
-from urh.signalprocessing.LabelSet import LabelSet
-from urh.signalprocessing.ProtocoLabel import ProtocolLabel
-from urh.signalprocessing.ProtocolBlock import ProtocolBlock
+from urh.signalprocessing.MessageType import MessageType
+from urh.signalprocessing.Modulator import Modulator
+from urh.signalprocessing.Participant import Participant
+from urh.signalprocessing.Message import Message
 from urh.signalprocessing.Signal import Signal
-from urh.signalprocessing.encoding import encoding
-from urh.util import FileOperator
-from urh.util.Formatter import Formatter
-
-
-class color:
-    PURPLE = '\033[95m'
-    CYAN = '\033[96m'
-    DARKCYAN = '\033[36m'
-    BLUE = '\033[94m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-    END = '\033[0m'
+from urh.signalprocessing.encoder import Encoder
+from urh.cythonext import util
+from urh.util.Logger import logger
 
 
 class ProtocolAnalyzerSignals(QObject):
@@ -46,17 +35,13 @@ class ProtocolAnalyzerSignals(QObject):
 class ProtocolAnalyzer(object):
     """
     The ProtocolAnalyzer is what you would refer to as "protocol".
-    The data is stored in the blocks variable.
+    The data is stored in the messages variable.
     This class offers several methods for protocol analysis.
     """
 
     def __init__(self, signal: Signal):
-        self.bit_alignment_positions = []
-        """:param bit_alignment_positions:
-        Um die Hex ASCII Darstellungen an beliebigen stellen auszurichten """
-
-        self.blocks = []
-        """:type: list of ProtocolBlock """
+        self.messages = []
+        """:type: list of Message """
 
         self.used_symbols = set()
         """:type: set of Symbol """
@@ -69,28 +54,31 @@ class ProtocolAnalyzer(object):
         self.show = Qt.Checked  # Show in Compare Frame?
         self.qt_signals = ProtocolAnalyzerSignals()
 
-        self.decoder = encoding(["Non Return To Zero (NRZ)"]) # For Default Encoding of Protocol
-        # Blocks
+        self.decoder = Encoder(["Non Return To Zero (NRZ)"])  # For Default Encoding of Protocol
 
-        self.labelsets = [LabelSet("default")]
+        self.message_types = [MessageType("default")]
 
     @property
-    def default_labelset(self):
-        if len(self.labelsets) == 0:
-            self.labelsets.append(LabelSet("default"))
+    def default_message_type(self) -> MessageType:
+        if len(self.message_types) == 0:
+            self.message_types.append(MessageType("default"))
 
-        return self.labelsets[0]
+        return self.message_types[0]
 
-    @default_labelset.setter
-    def default_labelset(self, val: LabelSet):
-        if len(self.labelsets) > 0:
-            self.labelsets[0] = val
+    @default_message_type.setter
+    def default_message_type(self, val: MessageType):
+        if len(self.message_types) > 0:
+            self.message_types[0] = val
         else:
-            self.labelsets.append(val)
+            self.message_types.append(val)
 
     @property
     def protocol_labels(self):
-        return [lbl for labelset in self.labelsets for lbl in labelset]
+        """
+
+        :rtype: list of ProtocolLabel
+        """
+        return [lbl for message_type in self.message_types for lbl in message_type]
 
     def __deepcopy__(self, memo):
         cls = self.__class__
@@ -117,19 +105,19 @@ class ProtocolAnalyzer(object):
 
     @property
     def pauses(self):
-        return [block.pause for block in self.blocks]
+        return [msg.pause for msg in self.messages]
 
     @property
     def plain_bits_str(self):
-        return [str(block) for block in self.blocks]
+        return [str(msg) for msg in self.messages]
 
     @property
     def plain_hex_str(self):
-        return [block.plain_hex_str for block in self.blocks]
+        return [msg.plain_hex_str for msg in self.messages]
 
     @property
     def plain_ascii_str(self):
-        return [block.plain_ascii_str for block in self.blocks]
+        return [msg.plain_ascii_str for msg in self.messages]
 
     @property
     def decoded_proto_bits_str(self):
@@ -137,7 +125,7 @@ class ProtocolAnalyzer(object):
 
         :rtype: list of str
         """
-        return [block.decoded_bits_str for block in self.blocks]
+        return [msg.decoded_bits_str for msg in self.messages]
 
     @property
     def decoded_hex_str(self):
@@ -145,7 +133,7 @@ class ProtocolAnalyzer(object):
 
         :rtype: list of str
         """
-        return [block.decoded_hex_str for block in self.blocks]
+        return [msg.decoded_hex_str for msg in self.messages]
 
     @property
     def decoded_ascii_str(self):
@@ -153,14 +141,14 @@ class ProtocolAnalyzer(object):
 
         :rtype: list of str
         """
-        return [block.decoded_ascii_str for block in self.blocks]
+        return [msg.decoded_ascii_str for msg in self.messages]
 
     @property
-    def num_blocks(self):
-        return len([b for b in self.blocks if b])
+    def num_messages(self):
+        return len([msg for msg in self.messages if msg])
 
     def clear_decoded_bits(self):
-        [block.clear_decoded_bits() for block in self.blocks]
+        [msg.clear_decoded_bits() for msg in self.messages]
 
     def decoded_to_str_list(self, view_type):
         if view_type == 0:
@@ -181,10 +169,9 @@ class ProtocolAnalyzer(object):
         else:
             srate = None
 
-        return '\n'.join(block.view_to_string(view, False, show_pauses,
-                                              sample_rate=srate
-                                              ) for block in self.blocks)
-
+        return '\n'.join(msg.view_to_string(view, False, show_pauses,
+                                            sample_rate=srate
+                                            ) for msg in self.messages)
 
     def plain_to_html(self, view, show_pauses=True) -> str:
         time = constants.SETTINGS.value('show_pause_as_time', type=bool)
@@ -194,42 +181,43 @@ class ProtocolAnalyzer(object):
             srate = None
 
         result = []
-        for block in self.blocks:
+        for message in self.messages:
             cur_str = ""
-            if block.participant:
-                color = constants.PARTICIPANT_COLORS[block.participant.color_index]
-                red, green, blue  = color.red(), color.green(), color.blue()
+            if message.participant:
+                color = constants.PARTICIPANT_COLORS[message.participant.color_index]
+                red, green, blue = color.red(), color.green(), color.blue()
                 fgcolor = "#000000" if (red * 0.299 + green * 0.587 + blue * 0.114) > 186 else "#ffffff"
-                cur_str += '<span style="background-color: rgb({0},{1},{2}); color: {3}">'.format(red, green, blue, fgcolor)
+                cur_str += '<span style="background-color: rgb({0},{1},{2}); color: {3}">'.format(red, green, blue,
+                                                                                                  fgcolor)
 
-                #cur_str += '<span style="color: rgb({0},{1},{2})">'.format(red, green, blue)
+                # cur_str += '<span style="color: rgb({0},{1},{2})">'.format(red, green, blue)
 
-            cur_str += block.view_to_string(view=view, decoded=False, show_pauses=False, sample_rate=srate)
+            cur_str += message.view_to_string(view=view, decoded=False, show_pauses=False, sample_rate=srate)
 
-            if block.participant:
+            if message.participant:
                 cur_str += '</span>'
 
-            cur_str += block.get_pause_str(sample_rate=srate)
+            cur_str += message.get_pause_str(sample_rate=srate)
             result.append(cur_str)
 
         return "<br>".join(result)
 
-    def set_decoder_for_blocks(self, decoder: encoding, blocks=None):
-        blocks = blocks if blocks is not None else self.blocks
+    def set_decoder_for_messages(self, decoder: Encoder, messages=None):
+        messages = messages if messages is not None else self.messages
         self.decoder = decoder
-        for block in blocks:
-            block.decoder = decoder
+        for message in messages:
+            message.decoder = decoder
 
     def get_protocol_from_signal(self):
         signal = self.signal
         if signal is None:
-            self.blocks = None
+            self.messages = None
             return
 
-        if self.blocks is not None:
-            self.blocks[:] = []
+        if self.messages is not None:
+            self.messages[:] = []
         else:
-            self.blocks = []
+            self.messages = []
 
         bit_len = signal.bit_len
 
@@ -243,15 +231,14 @@ class ProtocolAnalyzer(object):
 
         bit_data, pauses, bit_sample_pos = self._ppseq_to_bits(ppseq, bit_len, rel_symbol_len)
 
-
         i = 0
         for bits, pause in zip(bit_data, pauses):
             middle_bit_pos = bit_sample_pos[i][int(len(bits) / 2)]
             start, end = middle_bit_pos, middle_bit_pos + bit_len
             rssi = np.mean(np.abs(signal._fulldata[start:end]))
-            block = ProtocolBlock(bits, pause, self.bit_alignment_positions, labelset=self.default_labelset,
-                                  bit_len=bit_len, rssi=rssi, decoder=self.decoder, bit_sample_pos=bit_sample_pos[i])
-            self.blocks.append(block)
+            message = Message(bits, pause, message_type=self.default_message_type,
+                              bit_len=bit_len, rssi=rssi, decoder=self.decoder, bit_sample_pos=bit_sample_pos[i])
+            self.messages.append(message)
             i += 1
 
         self.qt_signals.protocol_updated.emit()
@@ -386,42 +373,34 @@ class ProtocolAnalyzer(object):
         self.used_symbols.add(symbol)
         return symbol
 
-    def add_bit_alignment(self, alignment):
-        self.bit_alignment_positions.append(alignment)
-        for block in self.blocks:
-            block.bit_alignment_positions.append(alignment)
-
-    def remove_bit_alignment(self, alignment):
-        self.bit_alignment_positions.remove(alignment)
-        for block in self.blocks:
-            block.bit_alignment_positions.remove(alignment)
-
-    def get_samplepos_of_bitseq(self, startblock: int, startindex: int,
-                                endblock: int, endindex: int,
+    def get_samplepos_of_bitseq(self, startmessage: int, startindex: int,
+                                endmessage: int, endindex: int,
                                 include_pause: bool):
         """
         Determine on which place (regarding samples) a bit sequence is
         :rtype: tuple[int,int]
         """
-        lookup = {i: block.bit_sample_pos for i, block in enumerate(self.blocks)}
+        lookup = {i: message.bit_sample_pos for i, message in enumerate(self.messages)}
+        try:
+            if startmessage > endmessage:
+                startmessage, endmessage = endmessage, startmessage
 
-        if startblock > endblock:
-            startblock, endblock = endblock, startblock
+            if startindex >= len(lookup[startmessage]) - 1:
+                startindex = len(lookup[startmessage]) - 1
+                if not include_pause:
+                    startindex -= 1
 
-        if startindex >= len(lookup[startblock]) - 1:
-            startindex = len(lookup[startblock]) - 1
-            if not include_pause:
-                startindex -= 1
+            if endindex >= len(lookup[endmessage]) - 1:
+                endindex = len(lookup[endmessage]) - 1
+                if not include_pause:
+                    endindex -= 1
 
-        if endindex >= len(lookup[endblock]) - 1:
-            endindex = len(lookup[endblock]) - 1
-            if not include_pause:
-                endindex -= 1
+            start = lookup[startmessage][startindex]
+            end = lookup[endmessage][endindex] - start
 
-        start = lookup[startblock][startindex]
-        end = lookup[endblock][endindex] - start
-
-        return start, end
+            return start, end
+        except KeyError:
+            return -1, -1
 
     def get_bitseq_from_selection(self, selection_start: int, selection_width: int, bitlen: int):
         """
@@ -430,119 +409,106 @@ class ProtocolAnalyzer(object):
         :param selection_start: Selektionsstart in Samples
         :param selection_width: Selektionsende in Samples
         :rtype: tuple[int,int,int,int]
-        :return: Startblock, Startindex, Endblock, Endindex
+        :return: Startmessage, Startindex, Endmessage, Endindex
         """
-        start_block = -1
+        start_message = -1
         start_index = -1
-        end_block = -1
+        end_message = -1
         end_index = -1
-        lookup =  [block.bit_sample_pos for block in self.blocks]
+        lookup = [msg.bit_sample_pos for msg in self.messages]
+        if not lookup:
+            return -1, -1, -1, -1
 
         if selection_start + selection_width < lookup[0][0] or selection_width < bitlen:
-            return start_block, start_index, end_block, end_index
+            return start_message, start_index, end_message, end_index
 
-        for j, block_sample_pos in enumerate(lookup):
-            if block_sample_pos[-2] < selection_start:
+        for j, msg_sample_pos in enumerate(lookup):
+            if msg_sample_pos[-2] < selection_start:
                 continue
-            elif start_block == -1:
-                start_block = j
-                for i, sample_pos in enumerate(block_sample_pos):
+            elif start_message == -1:
+                start_message = j
+                for i, sample_pos in enumerate(msg_sample_pos):
                     if sample_pos < selection_start:
                         continue
                     elif start_index == -1:
                         start_index = i
-                        if block_sample_pos[-1] - selection_start < selection_width:
+                        if msg_sample_pos[-1] - selection_start < selection_width:
                             break
                     elif sample_pos - selection_start > selection_width:
-                        end_block = j
+                        end_message = j
                         end_index = i
-                        return start_block, start_index, end_block, end_index
-            elif block_sample_pos[-1] - selection_start < selection_width:
+                        return start_message, start_index, end_message, end_index
+            elif msg_sample_pos[-1] - selection_start < selection_width:
                 continue
             else:
-                end_block = j
-                for i, sample_pos in enumerate(block_sample_pos):
+                end_message = j
+                for i, sample_pos in enumerate(msg_sample_pos):
                     if sample_pos - selection_start > selection_width:
                         end_index = i
-                        return start_block, start_index, end_block, end_index
+                        return start_message, start_index, end_message, end_index
 
-        last_block = len(lookup) - 1
-        last_index = len(lookup[last_block]) - 1
-        return start_block, start_index, last_block, last_index
+        last_message = len(lookup) - 1
+        last_index = len(lookup[last_message]) - 1
+        return start_message, start_index, last_message, last_index
 
-    def delete_blocks(self, block_start: int, block_end: int, start: int, end: int, view: int, decoded: bool,
-                      blockranges_for_groups=None):
-        removable_block_indices = []
+    def delete_messages(self, msg_start: int, msg_end: int, start: int, end: int, view: int, decoded: bool):
+        removable_msg_indices = []
 
-        for i in range(block_start, block_end + 1):
+        for i in range(msg_start, msg_end + 1):
             try:
-                self.blocks[i].clear_decoded_bits()
-                bs, be = self.convert_range(start, end, view, 0, decoded, block_indx=i)
-                del self.blocks[i][bs:be + 1]
-                if len(self.blocks[i]) == 0:
-                    removable_block_indices.append(i)
+                self.messages[i].clear_decoded_bits()
+                bs, be = self.convert_range(start, end, view, 0, decoded, message_indx=i)
+                del self.messages[i][bs:be + 1]
+                if len(self.messages[i]) == 0:
+                    removable_msg_indices.append(i)
             except IndexError:
                 continue
 
-        # Remove Empty Blocks and Pause after empty Blocks
-        for i in reversed(removable_block_indices):
-            del self.blocks[i]
+        # Remove empty messages and Pause after empty message
+        for i in reversed(removable_msg_indices):
+            del self.messages[i]
 
-    def convert_index(self, index: int, from_view: int, to_view: int, decoded: bool, block_indx=-1) -> tuple:
+    def convert_index(self, index: int, from_view: int, to_view: int, decoded: bool, message_indx=-1) -> tuple:
         """
         Konvertiert einen Index aus der einen Sicht (z.B. Bit) in eine andere (z.B. Hex)
 
-        :param block_indx: Wenn -1, wird der Block mit der maximalen Länge ausgewählt
+        :param message_indx: if -1, the message with max length is chosen
         :return:
         """
-        if len(self.blocks) == 0:
-            return (0, 0)
+        if len(self.messages) == 0:
+            return 0, 0
 
-        if block_indx == -1:
-            block_indx = self.blocks.index(max(self.blocks, key=len)) # Longest Block
+        if message_indx == -1:
+            message_indx = self.messages.index(max(self.messages, key=len))  # Longest message
 
-        if block_indx >= len(self.blocks):
-            block_indx = len(self.blocks) - 1
+        if message_indx >= len(self.messages):
+            message_indx = len(self.messages) - 1
 
-        return self.blocks[block_indx].convert_index(index, from_view, to_view, decoded)
+        return self.messages[message_indx].convert_index(index, from_view, to_view, decoded)
 
     def convert_range(self, index1: int, index2: int, from_view: int,
-                      to_view: int, decoded: bool, block_indx=-1):
-        start = self.convert_index(index1, from_view, to_view, decoded, block_indx=block_indx)[0]
-        end = self.convert_index(index2, from_view, to_view, decoded, block_indx=block_indx)[1]
+                      to_view: int, decoded: bool, message_indx=-1):
+        if len(self.messages) == 0:
+            return 0, 0
 
-        return int(start), int(math.ceil(end))
+        if message_indx == -1:
+            message_indx = self.messages.index(max(self.messages, key=len))  # Longest message
 
-    def copy_data(self):
-        """
+        if message_indx >= len(self.messages):
+            message_indx = len(self.messages) - 1
 
-        :rtype: list of ProtocolBlock, list of LabelSet
-        """
-        return copy.deepcopy(self.blocks), copy.deepcopy(self.labelsets)
-
-    def revert_to(self, orig_blocks, orig_labelsets):
-        """
-        Revert to previous state
-
-        :param orig_blocks: blocks to be restored
-        :type orig_blocks: list of ProtocolBlock
-        :param orig_labels: labels to be restored
-        :type orig_labels: list of ProtocolLabel
-        """
-        self.blocks = orig_blocks
-        """:type: list of ProtocolBlock """
-        self.labelsets = orig_labelsets
+        return self.messages[message_indx].convert_range(index1, index2, from_view, to_view, decoded)
 
     def find_differences(self, refindex: int, view: int):
         """
-        Sucht alle Unterschiede zwischen den Protokollblöcken, bezogen auf einen Referenzblock
+        Search all differences between protocol messages regarding a reference message
 
-        :param refindex: Index des Referenzblocks
+        :param refindex: index of reference message
         :rtype: dict[int, set[int]]
         """
         differences = defaultdict(set)
 
-        if refindex >= len(self.blocks):
+        if refindex >= len(self.messages):
             return differences
 
         if view == 0:
@@ -554,29 +520,28 @@ class ProtocolAnalyzer(object):
         else:
             return differences
 
-        refblock = proto[refindex]
-        len_refblock = len(refblock)
+        refmessage = proto[refindex]
+        len_refmessage = len(refmessage)
 
-
-        for i, block in enumerate(proto):
+        for i, message in enumerate(proto):
             if i == refindex:
                 continue
 
             diff_cols = set()
 
-            for j, value in enumerate(block):
-                if j >= len_refblock:
+            for j, value in enumerate(message):
+                if j >= len_refmessage:
                     break
 
-                if value != refblock[j]:
+                if value != refmessage[j]:
                     diff_cols.add(j)
 
-            len_block = len(block)
-            if len_block != len_refblock:
-                len_diff = abs(len_refblock - len_block)
-                start = len_refblock
-                if len_refblock > len_block:
-                    start = len_block
+            len_message = len(message)
+            if len_message != len_refmessage:
+                len_diff = abs(len_refmessage - len_message)
+                start = len_refmessage
+                if len_refmessage > len_message:
+                    start = len_message
                 end = start + len_diff
                 for k in range(start, end):
                     diff_cols.add(k)
@@ -584,24 +549,6 @@ class ProtocolAnalyzer(object):
             differences[i] = diff_cols
 
         return differences
-
-    @staticmethod
-    def from_file(filename: str):
-        """
-        :rtype: int, list of ProtocolGroup, set of Symbol
-        """
-        view_type, groups, symbols = FileOperator.read_protocol(filename)
-        return view_type, groups, symbols
-
-    def destroy(self):
-        self.bit_alignment_positions = None
-        try:
-            for labelset in self.labelsets:
-                labelset.clear()
-        except TypeError:
-            pass # No labelsets defined
-        self.labelsets = []
-        self.blocks = None
 
     def estimate_frequency_for_one(self, sample_rate: float, nbits=42) -> float:
         """
@@ -627,9 +574,9 @@ class ProtocolAnalyzer(object):
 
         assert self.signal is not None
         freqs = []
-        for i, block in enumerate(self.blocks):
-            for j, block_bit in enumerate(block.plain_bits):
-                if block_bit == bit:
+        for i, message in enumerate(self.messages):
+            for j, msg_bit in enumerate(message.plain_bits):
+                if msg_bit == bit:
                     start, nsamples = self.get_samplepos_of_bitseq(i, j, i, j + 1, False)
                     freq = self.signal.estimate_frequency(start, start + nsamples, sample_rate)
                     freqs.append(freq)
@@ -640,26 +587,32 @@ class ProtocolAnalyzer(object):
         else:
             return 0
 
-
     def __str__(self):
         return "ProtoAnalyzer " + self.name
 
     def set_labels(self, val):
         self._protocol_labels = val
 
-    def add_new_labelset(self, labels):
-        names = set(labelset.name for labelset in self.labelsets)
-        name = "Labelset #"
+    def add_new_message_type(self, labels):
+        names = set(message_type.name for message_type in self.message_types)
+        name = "Message type #"
         i = 0
         while True:
             i += 1
             if name + str(i) not in names:
-                self.labelsets.append(LabelSet(name=name+str(i), iterable=[copy.deepcopy(lbl) for lbl in labels]))
+                self.message_types.append(
+                    MessageType(name=name + str(i), iterable=[copy.deepcopy(lbl) for lbl in labels]))
                 break
 
+    def to_xml_tag(self, decodings, participants, tag_name="protocol", include_message_type=False,
+                   write_bits=False) -> ET.Element:
+        root = ET.Element(tag_name)
 
-    def to_xml(self, decoders) -> ET.Element:
-        root = ET.Element("protocol")
+        # Save modulators
+        if hasattr(self, "modulators"):  # For protocol analyzer container
+            modulators_tag = ET.SubElement(root, "modulators")
+            for i, modulator in enumerate(self.modulators):
+                modulators_tag.append(modulator.to_xml(i))
 
         # Save symbols
         if len(self.used_symbols) > 0:
@@ -668,30 +621,225 @@ class ProtocolAnalyzer(object):
                 ET.SubElement(symbols_tag, "symbol",
                               attrib={"name": symbol.name, "pulsetype": str(symbol.pulsetype),
                                       "nbits": str(symbol.nbits), "nsamples": str(symbol.nsamples)})
-        # Save data
-        data_tag = ET.SubElement(root, "blocks")
-        for i, block in enumerate(self.blocks):
-            data_tag.append(block.to_xml(decoders=decoders, include_labelset=False))
 
-        # Save labelsets separatively as not saved in blocks already
-        labelsets_tag = ET.SubElement(root, "labelsets")
-        for labelset in self.labelsets:
-            labelsets_tag.append(labelset.to_xml())
+        # Save decodings
+        if not decodings:
+            decodings = []
+            for message in self.messages:
+                if message.decoder not in decodings:
+                    decodings.append(message.decoder)
+
+        decodings_tag = ET.SubElement(root, "decodings")
+        for decoding in decodings:
+            dec_str = ""
+            for chn in decoding.get_chain():
+                dec_str += repr(chn) + ", "
+            dec_tag = ET.SubElement(decodings_tag, "decoding")
+            dec_tag.text = dec_str
+
+        # Save participants
+        if not participants:
+            participants = []
+            for message in self.messages:
+                if message.participant and message.participant not in participants:
+                    participants.append(message.participant)
+
+        participants_tag = ET.SubElement(root, "participants")
+        for participant in participants:
+            participants_tag.append(participant.to_xml())
+
+        # Save data
+        data_tag = ET.SubElement(root, "messages")
+        for i, message in enumerate(self.messages):
+            message_tag = message.to_xml(decoders=decodings, include_message_type=include_message_type)
+            if write_bits:
+                message_tag.set("bits", message.plain_bits_str)
+            data_tag.append(message_tag)
+
+        # Save message types separatively as not saved in messages already
+        if not include_message_type:
+            message_types_tag = ET.SubElement(root, "message_types")
+            for message_type in self.message_types:
+                message_types_tag.append(message_type.to_xml())
 
         return root
 
-    def from_xml(self, protocol_tag: ET.Element, participants, decoders):
-        if protocol_tag:
-            self.used_symbols.clear()
-            symbols_tag = protocol_tag.find("symbols")
-            if symbols_tag:
-                for symbol_tag in symbols_tag.findall("symbol"):
-                    s = Symbol(symbol_tag.get("name"), int(symbol_tag.get("nbits")),
-                               int(symbol_tag.get("pulsetype")), int(symbol_tag.get("nsamples")))
-                    self.used_symbols.add(s)
+    def to_xml_file(self, filename: str, decoders, participants, tag_name="protocol", include_message_types=False,
+                    write_bits=False):
+        tag = self.to_xml_tag(decodings=decoders, participants=participants, tag_name=tag_name,
+                              include_message_type=include_message_types, write_bits=write_bits)
 
-            block_tags = protocol_tag.find("blocks").findall("block")
+        xmlstr = minidom.parseString(ET.tostring(tag)).toprettyxml(indent="   ")
+        with open(filename, "w") as f:
+            for line in xmlstr.split("\n"):
+                if line.strip():
+                    f.write(line + "\n")
 
-            for i, block_tag in enumerate(block_tags):
-                self.blocks[i].from_xml(tag=block_tag, participants=participants, decoders=decoders, labelsets=self.labelsets)
-                self.blocks[i].pause = Formatter.str2val(block_tag.get("pause"), int)
+    def from_xml_tag(self, root: ET.Element, read_bits=False, participants=None, decodings=None):
+        if not root:
+            return None
+
+        if root.find("modulators") and hasattr(self, "modulators"):
+            self.modulators[:] = []
+            for mod_tag in root.find("modulators").findall("modulator"):
+                self.modulators.append(Modulator.from_xml(mod_tag))
+
+        decoders = self.read_decoders_from_xml_tag(root) if decodings is None else decodings
+
+        self.used_symbols.clear()
+        try:
+            for symbol_tag in root.find("symbols").findall("symbol"):
+                s = Symbol(symbol_tag.get("name"), int(symbol_tag.get("nbits")),
+                           int(symbol_tag.get("pulsetype")), int(symbol_tag.get("nsamples")))
+                self.used_symbols.add(s)
+        except AttributeError:
+            pass
+
+        if participants is None:
+            participants = self.read_participants_from_xml_tag(root)
+
+        if read_bits:
+            self.messages[:] = []
+
+        try:
+            message_types = []
+            for message_type_tag in root.find("message_types").findall("message_type"):
+                message_types.append(MessageType.from_xml(message_type_tag))
+        except AttributeError:
+            message_types = []
+
+        for message_type in message_types:
+            if message_type not in self.message_types:
+                self.message_types.append(message_type)
+
+        try:
+            message_tags = root.find("messages").findall("message")
+            for i, message_tag in enumerate(message_tags):
+                if read_bits:
+                    message = Message.from_plain_bits_str(bits=message_tag.get("bits"),
+                                                          symbols={s.name: s for s in self.used_symbols})
+                    message.from_xml(tag=message_tag, participants=participants, decoders=decoders,
+                                     message_types=self.message_types)
+                    self.messages.append(message)
+                else:
+                    try:
+                        self.messages[i].from_xml(tag=message_tag, participants=participants,
+                                                  decoders=decoders, message_types=self.message_types)
+                    except IndexError:
+                        pass  # Part of signal was copied in last session but signal was not saved
+
+        except AttributeError:
+            pass
+
+    @staticmethod
+    def read_participants_from_xml_tag(root: ET.Element):
+        try:
+            participants = []
+            for parti_tag in root.find("participants").findall("participant"):
+                participants.append(Participant.from_xml(parti_tag))
+            return participants
+        except AttributeError:
+            logger.warning("no participants found in xml")
+            return []
+
+    @staticmethod
+    def read_decoders_from_xml_tag(root: ET.Element):
+        try:
+            decoders = []
+            for decoding_tag in root.find("decodings").findall("decoding"):
+                conf = [d.strip().replace("'", "") for d in decoding_tag.text.split(",") if d.strip().replace("'", "")]
+                decoders.append(Encoder(conf))
+            return decoders
+        except AttributeError:
+            logger.error("no decodings found in xml")
+            return []
+
+    def from_xml_file(self, filename: str, read_bits=False):
+        try:
+            tree = ET.parse(filename)
+        except FileNotFoundError:
+            logger.error("Could not find file " + filename)
+            return
+        except ET.ParseError:
+            logger.error("Could not parse file " + filename)
+            return
+
+        root = tree.getroot()
+        self.from_xml_tag(root, read_bits=read_bits)
+
+    def destroy(self):
+        try:
+            for message_type in self.message_types:
+                message_type.clear()
+        except TypeError:
+            pass  # No message types defined
+        self.message_types = []
+        self.messages = None
+
+    def update_auto_message_types(self):
+        for message in self.messages:
+            for message_type in (msg_type for msg_type in self.message_types if msg_type.assigned_by_ruleset):
+                if message_type.ruleset.applies_for_message(message):
+                    message.message_type = message_type
+                    break
+
+    def auto_assign_participants(self, participants):
+        """
+
+        :type participants: list of Participant
+        :return:
+        """
+        if len(participants) == 0:
+            return
+
+        if len(participants) == 1:
+            for message in self.messages:
+                message.participant = participants[0]
+            return
+
+        rssis = np.array([msg.rssi for msg in self.messages], dtype=np.float32)
+        min_rssi, max_rssi = util.minmax(rssis)
+        center_spacing = (max_rssi - min_rssi) / (len(participants) - 1)
+        centers = [min_rssi + i * center_spacing for i in range(0, len(participants))]
+        rssi_assigned_centers = []
+
+        for rssi in rssis:
+            center_index = 0
+            diff = 999
+            for i, center in enumerate(centers):
+                if abs(center - rssi) < diff:
+                    center_index = i
+                    diff = abs(center - rssi)
+            rssi_assigned_centers.append(center_index)
+
+        participants.sort(key=lambda participant: participant.relative_rssi)
+        for message, center_index in zip(self.messages, rssi_assigned_centers):
+            if message.participant is None:
+                message.participant = participants[center_index]
+
+    def auto_assign_decodings(self, decodings):
+        """
+        :type decodings: list of Encoder
+        """
+        nrz_decodings = [decoding for decoding in decodings if decoding.is_nrz or decoding.is_nrzi]
+        fallback = nrz_decodings[0] if nrz_decodings else None
+        candidate_decodings = [decoding for decoding in decodings
+                               if decoding not in nrz_decodings and not decoding.contains_cut]
+
+        for message in self.messages:
+            decoder_found = False
+
+            for decoder in candidate_decodings:
+                if decoder.applies_for_message(message.plain_bits):
+                    message.decoder = decoder
+                    decoder_found = True
+                    break
+
+            if not decoder_found and fallback:
+                message.decoder = fallback
+
+    def auto_assign_labels(self):
+        format_finder = FormatFinder(self)
+
+        # OPEN: Perform multiple iterations with varying priorities later
+        format_finder.perform_iteration()
