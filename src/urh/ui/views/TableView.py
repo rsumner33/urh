@@ -9,6 +9,16 @@ class TableView(QTableView):
 
         super().__init__(parent)
 
+    def _add_insert_column_menu(self, menu):
+        column_menu = menu.addMenu("Insert column")
+
+        insert_column_left_action = column_menu.addAction("on the left")
+        insert_column_left_action.triggered.connect(self.on_insert_column_left_action_triggered)
+        insert_column_left_action.setIcon(QIcon.fromTheme("edit-table-insert-column-left"))
+        insert_column_right_action = column_menu.addAction("on the right")
+        insert_column_right_action.setIcon(QIcon.fromTheme("edit-table-insert-column-right"))
+        insert_column_right_action.triggered.connect(self.on_insert_column_right_action_triggered)
+
     def selectionModel(self) -> QItemSelectionModel:
         return super().selectionModel()
 
