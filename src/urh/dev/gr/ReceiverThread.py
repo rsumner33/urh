@@ -1,79 +1,82 @@
+import socket
+
 import numpy as np
-import zmq
 from PyQt5.QtCore import pyqtSignal
 
 from urh.dev.gr.AbstractBaseThread import AbstractBaseThread
-from urh.util.Logger import logger
-from urh.util.SettingsProxy import SettingsProxy
 
 
 class ReceiverThread(AbstractBaseThread):
-    data_received = pyqtSignal(np.ndarray)
+    index_changed = pyqtSignal(int, int)
 
-    def __init__(self, freq, sample_rate, bandwidth, gain, if_gain, baseband_gain, ip='127.0.0.1',
-                 parent=None, resume_on_full_receive_buffer=False):
-        super().__init__(freq, sample_rate, bandwidth, gain, if_gain, baseband_gain, True, ip, parent)
 
-        self.resume_on_full_receive_buffer = resume_on_full_receive_buffer  # for Live Sniffing
+    def __init__(self, sample_rate, freq, gain, bandwidth, ip='127.0.0.1',
+                 parent=None, initial_bufsize=8e9, is_ringbuffer=False):
+        super().__init__(sample_rate, freq, gain, bandwidth, True, ip, parent)
+
+        self.initial_bufsize = initial_bufsize
+        self.is_ringbuffer = is_ringbuffer  # Ringbuffer for Live Sniffing
         self.data = None
 
-        self.emit_data_received_signal = False
-
     def init_recv_buffer(self):
-        n_samples = SettingsProxy.get_receive_buffer_size(self.resume_on_full_receive_buffer, self.is_in_spectrum_mode)
-        self.data = np.zeros(n_samples, dtype=np.complex64)
+        while True:
+            try:
+                self.data = np.zeros(int(self.initial_bufsize), dtype=np.complex64)
+                break
+            except (OSError, MemoryError, ValueError):
+                self.initial_bufsize /= 2
 
     def run(self):
         if self.data is None:
             self.init_recv_buffer()
 
-        self.initialize_process()
-        logger.info("Initialize receive socket")
-        self.init_recv_socket()
+        self.initalize_process()
+
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+        while not self.isInterruptionRequested():
+            try:
+                self.socket.connect((self.ip, self.port))
+                break
+            except (ConnectionRefusedError, ConnectionResetError):
+                continue
 
         recv = self.socket.recv
         rcvd = b""
 
-        try:
-            while not self.isInterruptionRequested():
-                try:
-                    rcvd += recv(32768)  # Receive Buffer = 32768 Byte
-                except (zmq.error.ContextTerminated, ConnectionResetError):
-                    self.stop("Stopped receiving, because connection was reset.")
-                    return
-                except OSError as e:  # https://github.com/jopohl/urh/issues/131
-                    logger.warning("Error occurred", str(e))
+        while not self.isInterruptionRequested():
 
-                if len(rcvd) < 8:
-                    self.stop("Stopped receiving: No data received anymore")
-                    return
+            try:
+                rcvd += recv(32768)  # Receive Buffer = 32768 Byte
+            except ConnectionResetError:
+                self.stop("Stopped receiving, because connection was reset.")
+                return
 
-                if len(rcvd) % 8 != 0:
-                    continue
+            if len(rcvd) < 8:
+                self.stop("Stopped receiving: No data received anymore")
+                return
 
-                try:
-                    tmp = np.fromstring(rcvd, dtype=np.complex64)
+            if len(rcvd) % 8 != 0:
+                continue
 
-                    num_samples = len(tmp)
-                    if self.data is None:
-                        # seems to be sometimes None in rare cases
-                        self.init_recv_buffer()
+            try:
+                tmp = np.fromstring(rcvd, dtype=np.complex64)
 
-                    if self.current_index + num_samples >= len(self.data):
-                        if self.resume_on_full_receive_buffer:
-                            self.current_index = 0
-                            if num_samples >= len(self.data):
-                                self.stop("Receiving buffer too small.")
-                        else:
-                            self.stop("Receiving Buffer is full.")
-                            return
-                    self.data[self.current_index:self.current_index + num_samples] = tmp
-                    self.current_index += num_samples
-                    if self.emit_data_received_signal:
-                        self.data_received.emit(tmp)
+                len_tmp = len(tmp)
+                if self.current_index + len_tmp >= len(self.data):
+                    if self.is_ringbuffer:
+                        self.current_index = 0
+                        if len_tmp >= len(self.data):
+                            self.stop("Receiving buffer too small.")
+                    else:
+                        self.stop("Receiving Buffer is full.")
+                        return
+                self.data[self.current_index:self.current_index + len_tmp] = tmp
+                self.current_index += len_tmp
+                self.index_changed.emit(self.current_index - len_tmp,
+                                        self.current_index)
 
-                    rcvd = b""
-                except ValueError:
-                    self.stop("Could not receive data. Is your Hardware ok?")
-        except RuntimeError:
-            logger.error("Receiver Thread crashed.")
+                rcvd = b""
+            except ValueError:
+                self.stop("Could not receive data. Is your Hardware ok?")

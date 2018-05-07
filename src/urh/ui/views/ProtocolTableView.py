@@ -1,9 +1,9 @@
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtWidgets import QHeaderView, QAction, QMenu, QActionGroup
-from PyQt5.QtGui import QKeySequence, QDropEvent
+from PyQt5.QtGui import QKeySequence, QDropEvent, QIcon
 import numpy
 
-from urh import constants
+from urh.signalprocessing.LabelSet import LabelSet
 from urh.signalprocessing.ProtocoLabel import ProtocolLabel
 from urh.models.ProtocolTableModel import ProtocolTableModel
 from urh.ui.views.TableView import TableView
@@ -19,6 +19,9 @@ class ProtocolTableView(TableView):
     revert_sync_cropping_wanted = pyqtSignal()
     edit_label_clicked = pyqtSignal(ProtocolLabel)
     files_dropped = pyqtSignal(list)
+    participant_changed = pyqtSignal()
+    new_labelset_clicked  = pyqtSignal(list) # list of protocol blocks
+    labelset_selected = pyqtSignal(LabelSet, list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -66,11 +69,11 @@ class ProtocolTableView(TableView):
         else:
             self.model().refindex = self.rowAt(y)
 
-    def hide_row(self, *args, y=None):
-        if y is None:
+    def hide_row(self, *args, row=None):
+        if row is None:
             rows = [index.row() for index in self.selectionModel().selectedIndexes()]
         else:
-            rows = [self.rowAt(y)]
+            rows = [row]
 
         refindex = self.model().refindex
         for row in rows:
@@ -109,6 +112,53 @@ class ProtocolTableView(TableView):
         row = self.rowAt(event.pos().y())
         cols = [index.column() for index in self.selectionModel().selectedIndexes() if index.row() == row]
         cols.sort()
+
+        pos = event.pos()
+        row = self.rowAt(pos.y())
+        min_row, max_row, start, end = self.selection_range()
+        selected_blocks = []
+        particpnt_actions = {}
+
+        for i in range(min_row, max_row + 1):
+            selected_blocks.append(self.model().protocol.blocks[i])
+
+        if len(selected_blocks) == 0:
+            selected_participant = -1
+            selected_labelset = -1
+        else:
+            selected_participant = selected_blocks[0].participant
+            selected_labelset  = selected_blocks[0].labelset
+            for block in selected_blocks:
+                if selected_participant != block.participant:
+                    selected_participant = -1
+                if selected_labelset != block.labelset:
+                    selected_labelset  = -1
+                if selected_labelset == -1 and selected_participant == -1:
+                    break
+
+
+        if self.model().participants and self.model().protocol and not self.selectionModel().selection().isEmpty():
+
+            partigroup = QActionGroup(self)
+            participant_menu = menu.addMenu("Participant")
+            none_partipnt_action = participant_menu.addAction("None")
+            none_partipnt_action.setCheckable(True)
+            none_partipnt_action.setActionGroup(partigroup)
+
+            if selected_participant is None:
+                none_partipnt_action.setChecked(True)
+
+            for particpnt in self.model().participants:
+                pa = participant_menu.addAction(particpnt.name + " (" + particpnt.shortname + ")")
+                pa.setCheckable(True)
+                pa.setActionGroup(partigroup)
+                if selected_participant == particpnt:
+                    pa.setChecked(True)
+
+                particpnt_actions[pa] = particpnt
+        else:
+            none_partipnt_action = 42
+
         try:
             selected_label = self.controller.get_labels_from_selection(row, row, cols[0],
                                                                       cols[-1])[0]
@@ -118,21 +168,27 @@ class ProtocolTableView(TableView):
             editLabelAction = 42
             selected_label = None
 
-        try:
-            data = self.model().display_data[row]
-            if len(cols) <= 10:
-                val_string = data[cols[0]:cols[-1] + 1]
-            else:
-                val_string = data[cols[0]:cols[0] + 5] + " ... " + data[cols[-1] - 4:cols[-1] + 1]
-            labelMenu = menu.addMenu(self.tr("Add Protocol Label"))
-            restrictiveLabelAction = labelMenu.addAction(self.tr("Match exactly " + val_string))
-            unrestrictiveLabelAction = labelMenu.addAction(
-            self.tr("Match range {0:d}-{1:d} only".format(cols[0] + 1, cols[-1] + 1)))
-        except (IndexError, TypeError):
-            labelMenu = 42
-            restrictiveLabelAction = 42
-            unrestrictiveLabelAction = 42
+        menu.addSeparator()
 
+        createLabelAction = menu.addAction(self.tr("Add protocol label"))
+        createLabelAction.setIcon(QIcon.fromTheme("list-add"))
+
+        labelsetMenu = menu.addMenu(self.tr("Labelset"))
+        labelsetgroup = QActionGroup(self)
+        labelset_actions = {}
+        for labelset in self.model().protocol.labelsets:
+            action = labelsetMenu.addAction(labelset.name)
+            action.setCheckable(True)
+            action.setActionGroup(labelsetgroup)
+
+            if selected_labelset == labelset:
+                action.setChecked(True)
+
+            labelset_actions[action] = labelset
+
+        new_labelset_action = labelsetMenu.addAction("Create new")
+
+        menu.addSeparator()
         if not self.model().is_writeable:
             showInterpretationAction = menu.addAction(self.tr("Show in Interpretation"))
         else:
@@ -167,9 +223,6 @@ class ProtocolTableView(TableView):
             writeAbleAction.setCheckable(True)
             writeAbleAction.setChecked(False)
 
-        pos = event.pos()
-        row = self.rowAt(pos.y())
-        min_row, max_row, start, end = self.selection_range()
         menu.addSeparator()
         undo_stack = self.model().undo_stack
         view = self.model().proto_view
@@ -186,10 +239,8 @@ class ProtocolTableView(TableView):
             self.set_ref_block(y=pos.y())
         elif action == editLabelAction:
             self.edit_label_clicked.emit(selected_label)
-        elif action == restrictiveLabelAction:
-            self.model().addProtoLabel(start, end - 1, row, True)
-        elif action == unrestrictiveLabelAction:
-            self.model().addProtoLabel(start, end - 1, row, False)
+        elif action == createLabelAction:
+            self.model().addProtoLabel(start, end - 1, row)
         elif action == showInterpretationAction:
             self.show_interpretation_clicked.emit(min_row, start, max_row, end - 1)
         elif action == showRowAction:
@@ -216,3 +267,16 @@ class ProtocolTableView(TableView):
             self.protocol_view_change_clicked.emit(2)
         elif action == writeAbleAction:
             self.writeable_changed.emit(writeAbleAction.isChecked())
+        elif action == none_partipnt_action:
+            for block in selected_blocks:
+                block.participant = None
+            self.participant_changed.emit()
+        elif action in particpnt_actions:
+            for block in selected_blocks:
+                block.participant = particpnt_actions[action]
+            self.participant_changed.emit()
+        elif action == new_labelset_action:
+            self.new_labelset_clicked.emit(selected_blocks)
+        elif action in labelset_actions:
+            self.labelset_selected.emit(labelset_actions[action], selected_blocks)
+

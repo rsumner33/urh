@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file '../ui/main.ui'
 #
-# Created by: PyQt5 UI code generator 5.5.1
+# Created by: PyQt5 UI code generator 5.6
 #
 # WARNING! All changes made in this file will be lost!
 
@@ -12,6 +11,9 @@ class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
         MainWindow.resize(1017, 884)
+        icon = QtGui.QIcon()
+        icon.addPixmap(QtGui.QPixmap(":/icons/data/icons/appicon.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        MainWindow.setWindowIcon(icon)
         MainWindow.setTabShape(QtWidgets.QTabWidget.Rounded)
         MainWindow.setDockNestingEnabled(False)
         self.centralwidget = QtWidgets.QWidget(MainWindow)
@@ -25,6 +27,7 @@ class Ui_MainWindow(object):
         self.layoutWidget = QtWidgets.QWidget(self.splitter)
         self.layoutWidget.setObjectName("layoutWidget")
         self.verticalLayout_3 = QtWidgets.QVBoxLayout(self.layoutWidget)
+        self.verticalLayout_3.setContentsMargins(0, 0, 0, 0)
         self.verticalLayout_3.setObjectName("verticalLayout_3")
         self.lnEdtTreeFilter = QtWidgets.QLineEdit(self.layoutWidget)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
@@ -50,9 +53,17 @@ class Ui_MainWindow(object):
         self.fileTree.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.fileTree.setSortingEnabled(False)
         self.fileTree.setObjectName("fileTree")
-        self.fileTree.header().setCascadingSectionResizes(False)
+        self.fileTree.header().setCascadingSectionResizes(True)
         self.fileTree.header().setStretchLastSection(False)
         self.verticalLayout_3.addWidget(self.fileTree)
+        self.label = QtWidgets.QLabel(self.layoutWidget)
+        self.label.setObjectName("label")
+        self.verticalLayout_3.addWidget(self.label)
+        self.listViewParticipants = QtWidgets.QListView(self.layoutWidget)
+        self.listViewParticipants.setObjectName("listViewParticipants")
+        self.verticalLayout_3.addWidget(self.listViewParticipants)
+        self.verticalLayout_3.setStretch(1, 3)
+        self.verticalLayout_3.setStretch(3, 1)
         self.tabWidget = QtWidgets.QTabWidget(self.splitter)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         sizePolicy.setHorizontalStretch(1)
@@ -63,16 +74,19 @@ class Ui_MainWindow(object):
         self.tab_interpretation = QtWidgets.QWidget()
         self.tab_interpretation.setObjectName("tab_interpretation")
         self.verticalLayout_2 = QtWidgets.QVBoxLayout(self.tab_interpretation)
+        self.verticalLayout_2.setContentsMargins(0, 0, 0, 0)
         self.verticalLayout_2.setObjectName("verticalLayout_2")
         self.tabWidget.addTab(self.tab_interpretation, "")
         self.tab_protocol = QtWidgets.QWidget()
         self.tab_protocol.setObjectName("tab_protocol")
         self.verticalLayout = QtWidgets.QVBoxLayout(self.tab_protocol)
+        self.verticalLayout.setContentsMargins(0, 0, 0, 0)
         self.verticalLayout.setObjectName("verticalLayout")
         self.tabWidget.addTab(self.tab_protocol, "")
         self.tab_generator = QtWidgets.QWidget()
         self.tab_generator.setObjectName("tab_generator")
         self.verticalLayout_5 = QtWidgets.QVBoxLayout(self.tab_generator)
+        self.verticalLayout_5.setContentsMargins(0, 0, 0, 0)
         self.verticalLayout_5.setObjectName("verticalLayout_5")
         self.tabWidget.addTab(self.tab_generator, "")
         self.verticalLayout_4.addWidget(self.splitter)
@@ -82,7 +96,7 @@ class Ui_MainWindow(object):
         self.verticalLayout_4.addWidget(self.progressBar)
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QtWidgets.QMenuBar(MainWindow)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 1017, 23))
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 1017, 21))
         self.menubar.setObjectName("menubar")
         self.menuFile = QtWidgets.QMenu(self.menubar)
         self.menuFile.setObjectName("menuFile")
@@ -195,6 +209,11 @@ class Ui_MainWindow(object):
         self.actionConvert_Folder_to_Project.setIconVisibleInMenu(True)
         self.actionConvert_Folder_to_Project.setObjectName("actionConvert_Folder_to_Project")
         self.actionDecoding = QtWidgets.QAction(MainWindow)
+        self.actionDecoding.setObjectName("actionDecoding")
+        self.actionRecord = QtWidgets.QAction(MainWindow)
+        self.actionRecord.setIconVisibleInMenu(True)
+        self.actionRecord.setObjectName("actionRecord")
+        self.actionSpectrum_Analyzer = QtWidgets.QAction(MainWindow)
         self.actionSpectrum_Analyzer.setIconVisibleInMenu(True)
         self.actionSpectrum_Analyzer.setObjectName("actionSpectrum_Analyzer")
         self.actionOptions = QtWidgets.QAction(MainWindow)
@@ -209,7 +228,16 @@ class Ui_MainWindow(object):
         self.actionNew_Project.setObjectName("actionNew_Project")
         self.actionSniff_protocol = QtWidgets.QAction(MainWindow)
         self.actionSniff_protocol.setObjectName("actionSniff_protocol")
+        self.actionProject_settings = QtWidgets.QAction(MainWindow)
+        self.actionProject_settings.setObjectName("actionProject_settings")
+        self.actionSave_project = QtWidgets.QAction(MainWindow)
+        icon = QtGui.QIcon.fromTheme("document-save")
+        self.actionSave_project.setIcon(icon)
+        self.actionSave_project.setObjectName("actionSave_project")
         self.menuFile.addAction(self.actionNew_Project)
+        self.menuFile.addAction(self.actionProject_settings)
+        self.menuFile.addAction(self.actionSave_project)
+        self.menuFile.addSeparator()
         self.menuFile.addAction(self.actionOpen)
         self.menuFile.addAction(self.actionRecord)
         self.menuFile.addAction(self.actionSniff_protocol)
@@ -243,6 +271,7 @@ class Ui_MainWindow(object):
         _translate = QtCore.QCoreApplication.translate
         MainWindow.setWindowTitle(_translate("MainWindow", "Universal Radio Hacker"))
         self.lnEdtTreeFilter.setPlaceholderText(_translate("MainWindow", "Filter"))
+        self.label.setText(_translate("MainWindow", "Participants:"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_interpretation), _translate("MainWindow", "Interpretation"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_protocol), _translate("MainWindow", "Analysis"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_generator), _translate("MainWindow", "Generator"))
@@ -285,6 +314,8 @@ class Ui_MainWindow(object):
         self.actionShow_file_tree.setText(_translate("MainWindow", "Show file tree"))
         self.actionNew_Project.setText(_translate("MainWindow", "New Project.."))
         self.actionSniff_protocol.setText(_translate("MainWindow", "Sniff protocol..."))
+        self.actionProject_settings.setText(_translate("MainWindow", "Project settings..."))
+        self.actionSave_project.setText(_translate("MainWindow", "Save project"))
 
 from urh.ui.views.DirectoryTreeView import DirectoryTreeView
 from . import urh_rc

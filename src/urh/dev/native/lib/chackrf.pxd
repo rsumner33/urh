@@ -1,3 +1,5 @@
+# file: cqueue.pxd
+
 cdef extern from "libhackrf/hackrf.h":
     enum hackrf_error:
         HACKRF_SUCCESS = 0
@@ -136,6 +138,9 @@ cdef extern from "libhackrf/hackrf.h":
     
     # range 0-47 step 1db
     int hackrf_set_txvga_gain(hackrf_device* device, uint32_t value)
+    
+    # antenna port power control
+    int hackrf_set_antenna_enable(hackrf_device* device, const uint8_t value)
     
     const char* hackrf_error_name(hackrf_error errcode)
     const char* hackrf_board_id_name(hackrf_board_id board_id)

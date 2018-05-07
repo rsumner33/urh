@@ -1,11 +1,16 @@
 import copy
 import math
-
+import xml.etree.ElementTree as ET
 import sys
 
+import numpy as np
 from urh.cythonext.signalFunctions import Symbol
+from urh.signalprocessing.ProtocoLabel import ProtocolLabel
+
+from urh.signalprocessing.LabelSet import LabelSet
 from urh.signalprocessing.encoding import encoding
 from urh.util.Formatter import Formatter
+from urh.util.Logger import logger
 
 
 class ProtocolBlock(object):
@@ -13,8 +18,8 @@ class ProtocolBlock(object):
     A protocol block is a single line of a protocol.
     """
 
-    def __init__(self, plain_bits, pause: int, bit_alignment_positions, rssi=0, modulator_indx=0, decoder=None,
-                 fuzz_created=None, bit_sample_pos=None, bit_len=100, exclude_from_decoding_labels=None):
+    def __init__(self, plain_bits, pause: int, bit_alignment_positions, labelset: LabelSet, rssi=0, modulator_indx=0, decoder=None,
+                 fuzz_created=False, bit_sample_pos=None, bit_len=100):
         """
 
         :param pause: Pause NACH dem Block in Samples
@@ -23,13 +28,18 @@ class ProtocolBlock(object):
         :type bit_alignment_positions: list of int
         :param bit_alignment_positions: Für Ausrichtung der Hex Darstellung (Leere Liste für Standardverhalten)
         :param bit_len: Für Übernahme der Bitlänge in Modulator Dialog
-        :param fuzz_created: Eine Liste von Tupeln von Start und End Indizes, wenn dieser Block durch Fuzzing erzeugt wurde
+        :param fuzz_created: Block was created thrugh fuzzing
         :return:
         """
         self.__plain_bits = plain_bits
         self.pause = pause
         self.modulator_indx = modulator_indx
         self.rssi = rssi
+        self.participant = None
+        """:type: Participant """
+
+        self.labelset = labelset
+        """:type: LabelSet """
 
         self.absolute_time = 0  # set in Compare Frame
         self.relative_time = 0  # set in Compare Frame
@@ -38,16 +48,11 @@ class ProtocolBlock(object):
         """:type: encoding """
 
         self.bit_alignment_positions = bit_alignment_positions
-        self.fuzz_created = fuzz_created if fuzz_created is not None else []
-        self.fuzz_labels = []
-        """:type: list of ProtocolLabel """
+        self.fuzz_created = fuzz_created
 
         self.__decoded_bits = None
         self.__encoded_bits = None
         self.decoding_errors = 0
-
-        self.exclude_from_decoding_labels = [] if exclude_from_decoding_labels is None else exclude_from_decoding_labels
-        """:type: list of ProtocolLabel """
 
         self.bit_len = bit_len  # Für Übernahme in Modulator
 
@@ -55,6 +60,10 @@ class ProtocolBlock(object):
             self.bit_sample_pos = []
         else:
             self.bit_sample_pos = bit_sample_pos
+            """
+            :param bit_sample_pos: Position of samples for each bit. Last position is pause so last bit is on pos -2.
+            :type  bit_sample_pos: list of int
+            """
 
     @property
     def plain_bits(self):
@@ -70,6 +79,14 @@ class ProtocolBlock(object):
         self.clear_decoded_bits()
         self.clear_encoded_bits()
 
+
+    @property
+    def active_fuzzing_labels(self):
+        return [lbl for lbl in self.labelset if lbl.active_fuzzing]
+
+    @property
+    def exclude_from_decoding_labels(self):
+        return [lbl for lbl in self.labelset if not lbl.apply_decoding]
 
     def __getitem__(self, index: int):
         return self.plain_bits[index]
@@ -93,40 +110,39 @@ class ProtocolBlock(object):
                 step = 1
             number_elements = len(range(index.start, index.stop, step))
 
-            for l in self.fuzz_labels[:]:
+            for l in self.labelset[:]:
                 if index.start <= l.start and index.stop >= l.end:
-                    self.fuzz_labels.remove(l)
+                    self.labelset.remove(l)
 
                 elif index.stop - 1 < l.start:
                     l_cpy = copy.deepcopy(l)
                     l_cpy.start -= number_elements
                     l_cpy.end -= number_elements
-                    self.fuzz_labels.remove(l)
-                    self.fuzz_labels.append(l_cpy)
+                    self.labelset.remove(l)
+                    self.labelset.append(l_cpy)
 
                 elif index.start <= l.start and index.stop >= l.start:
-                    self.fuzz_labels.remove(l)
+                    self.labelset.remove(l)
 
                 elif index.start >= l.start and index.stop <= l.end:
-                    self.fuzz_labels.remove(l)
+                    self.labelset.remove(l)
 
                 elif index.start >= l.start and index.start < l.end:
-                    self.fuzz_labels.remove(l)
+                    self.labelset.remove(l)
         else:
-            fuzz_labels = self.fuzz_labels
-            for l in fuzz_labels:
+            for l in self.labelset:
                 if index < l.start:
                     l_cpy = copy.deepcopy(l)
                     l_cpy.start -= 1
                     l_cpy.end -= 1
-                    self.fuzz_labels.remove(l)
-                    self.fuzz_labels.append(l_cpy)
+                    self.labelset.remove(l)
+                    self.labelset.append(l_cpy)
                 elif l.start < index < l.end:
                     l_cpy = copy.deepcopy(l)
                     l_cpy.start = index - 1
-                    self.fuzz_labels.remove(l)
+                    self.labelset.remove(l)
                     if l_cpy.end - l_cpy.start > 0:
-                        self.fuzz_labels.append(l_cpy)
+                        self.labelset.append(l_cpy)
 
         del self.plain_bits[index]
 
@@ -285,6 +301,11 @@ class ProtocolBlock(object):
         return str(self)
 
     @property
+    def decoded_bits_buffer(self) -> bytes:
+        bits = [b if isinstance(b, bool) else True if b.pulsetype == 1 else False for b in self.decoded_bits]
+        return np.packbits(bits).tobytes()
+
+    @property
     def plain_hex_str(self) -> str:
         splitted_blocks = self.split(decode=False)
         padded_blocks = [self.pad_block(b, 4) for b in splitted_blocks]
@@ -352,7 +373,7 @@ class ProtocolBlock(object):
             result += factor * (from_index - cur_index)
 
         end = result + factor - 1
-        end = end if end < len(bits) else len(bits) - 1
+        #end = end if end < len(bits) else len(bits) - 1
 
         return result, end
 
@@ -398,6 +419,12 @@ class ProtocolBlock(object):
         else:
             raise NotImplementedError("Only Three View Types (Bit/Hex/ASCII)")
 
+
+    def get_duration(self, sample_rate: int) -> float:
+        if len(self.bit_sample_pos) < 2:
+            raise ValueError("Not enough bit samples for calculating duration")
+
+        return (self.bit_sample_pos[-1] - self.bit_sample_pos[0]) / sample_rate
 
     @staticmethod
     def __blocks_to_hex(blocks) -> str:
@@ -478,12 +505,17 @@ class ProtocolBlock(object):
             return None
 
         if show_pauses:
-            if sample_rate:
-                return '%s [Pause: %s]' % (proto, Formatter.science_time(self.pause / sample_rate))
-            else:
-                return '%s [Pause: %d samples]' % (proto, self.pause)
+            return '%s %s' % (proto, self.get_pause_str(sample_rate))
         else:
             return proto
+
+
+    def get_pause_str(self, sample_rate):
+        if sample_rate:
+            return ' [<b>Pause:</b> %s]' % (Formatter.science_time(self.pause / sample_rate))
+        else:
+            return ' [<b>Pause:</b> %d samples]' % (self.pause)
+
 
     def clear_decoded_bits(self):
         self.__decoded_bits = None
@@ -506,4 +538,50 @@ class ProtocolBlock(object):
                     print("[Warning] Did not find symbol name", file=sys.stderr)
                     plain_bits.append(Symbol(b, 0, 0, 1))
 
-        return ProtocolBlock(plain_bits, 0, [])
+        return ProtocolBlock(plain_bits=plain_bits, pause=0, bit_alignment_positions=[], labelset=LabelSet("none"))
+
+    def to_xml(self, decoders=None, include_labelset=False) -> ET.Element:
+        root = ET.Element("block")
+        root.set("labelset_id", self.labelset.id)
+        root.set("modulator_index", str(self.modulator_indx))
+        root.set("pause", str(self.pause))
+        if decoders:
+            root.set("decoding_index", str(decoders.index(self.decoder)))
+        if self.participant is not None:
+            root.set("participant_id",  self.participant.id)
+        if include_labelset:
+            root.append(self.labelset.to_xml())
+        return root
+
+    def from_xml(self, tag: ET.Element, participants, decoders=None, labelsets=None):
+        part_id = tag.get("participant_id", None)
+        labelset_id = tag.get("labelset_id", None)
+        self.modulator_indx = int(tag.get("modulator_index", self.modulator_indx))
+        self.pause = int(tag.get("pause", self.pause))
+        decoding_index = tag.get("decoding_index", None)
+        if decoding_index:
+            self.decoder = decoders[int(decoding_index)]
+
+        if part_id:
+            for participant in participants:
+                if participant.id_match(part_id):
+                    self.participant = participant
+                    break
+            if self.participant is None:
+                logger.warning("No participant matched the id {0} from xml".format(part_id))
+
+        if labelset_id and labelsets:
+            for labelset in labelsets:
+                if labelset.id == labelset_id:
+                    self.labelset = labelset
+                    break
+
+        labelset_tag = tag.find("labelset")
+        if labelset_tag:
+            self.labelset = LabelSet.from_xml(labelset_tag)
+
+
+    def get_label_range(self, lbl: ProtocolLabel, view: int, decode: bool):
+        start = self.convert_index(index=lbl.start, from_view=0, to_view=view, decoded=decode)[0]
+        end = self.convert_index(index=lbl.end, from_view=0, to_view=view, decoded=decode)[1]
+        return int(start), int(end)

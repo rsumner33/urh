@@ -12,21 +12,23 @@ from urh.controller.SendRecvDialogController import SendRecvDialogController, Mo
 from urh.models.GeneratorListModel import GeneratorListModel
 from urh.models.GeneratorTableModel import GeneratorTableModel
 from urh.models.GeneratorTreeModel import GeneratorTreeModel
+from urh.signalprocessing.LabelSet import LabelSet
 from urh.signalprocessing.Modulator import Modulator
 from urh.signalprocessing.ProtocoLabel import ProtocolLabel
 from urh.signalprocessing.ProtocolBlock import ProtocolBlock
 from urh.signalprocessing.encoding import encoding
 from urh.ui.actions.Fuzz import Fuzz
 from urh.ui.ui_generator import Ui_GeneratorTab
-from urh.util import FileOperator, util
+from urh.util import FileOperator
 from urh.util.Errors import Errors
 from urh.util.Formatter import Formatter
 from urh.util.ProjectManager import ProjectManager
+from urh.util.Logger import logger
 
 
 class GeneratorTabController(QWidget):
     def __init__(self, compare_frame_controller: CompareFrameController,
-                 project_manager: ProjectManager, encoders, parent=None):
+                 project_manager: ProjectManager, parent=None):
         """
         :type encoders: list of encoding
         :return:
@@ -34,9 +36,7 @@ class GeneratorTabController(QWidget):
         super().__init__(parent)
         self.ui = Ui_GeneratorTab()
         self.ui.setupUi(self)
-        util.set_splitter_stylesheet(self.ui.splitter)
 
-        self.encoders = encoders
         self.modulated_scene_is_locked = False
 
         self.ui.treeProtocols.setHeaderHidden(True)
@@ -44,18 +44,15 @@ class GeneratorTabController(QWidget):
         self.tree_model.set_root_item(compare_frame_controller.proto_tree_model.rootItem)
         self.tree_model.controller = self
         self.ui.treeProtocols.setModel(self.tree_model)
-        self.modulators = [Modulator("Modulation")]
-        """:type: list of Modulator """
 
         self.has_default_modulation = True
 
-        self.table_model = GeneratorTableModel(compare_frame_controller.proto_tree_model.rootItem,
-                                               self.modulators, self.encoders)
+        self.table_model = GeneratorTableModel(compare_frame_controller.proto_tree_model.rootItem, [Modulator("Modulation")])
         """:type: GeneratorTableModel """
         self.table_model.controller = self
         self.ui.tableBlocks.setModel(self.table_model)
 
-        self.label_list_model = GeneratorListModel(self.table_model.protocol)
+        self.label_list_model = GeneratorListModel(None)
         self.ui.listViewProtoLabels.setModel(self.label_list_model)
 
         self.refresh_modulators()
@@ -80,6 +77,7 @@ class GeneratorTabController(QWidget):
         self.label_list_model.protolabel_fuzzing_status_changed.connect(self.set_fuzzing_ui_status)
         self.ui.cbViewType.currentIndexChanged.connect(self.on_view_type_changed)
         self.ui.btnSend.clicked.connect(self.on_btn_send_clicked)
+        self.ui.btnSave.clicked.connect(self.on_btn_save_clicked)
 
         self.label_list_model.protolabel_removed.connect(self.handle_proto_label_removed)
 
@@ -89,7 +87,6 @@ class GeneratorTabController(QWidget):
         self.ui.lWPauses.doubleClicked.connect(self.on_lWPauses_double_clicked)
         self.ui.btnGenerate.clicked.connect(self.generate_file)
         self.ui.listViewProtoLabels.editActionTriggered.connect(self.show_fuzzing_dialog)
-        self.ui.listViewProtoLabels.editAllActionTriggered.connect(self.show_epic_fuzzing_dialog)
         self.label_list_model.protolabel_fuzzing_status_changed.connect(self.handle_plabel_fuzzing_state_changed)
         self.ui.btnFuzz.clicked.connect(self.on_btn_fuzzing_clicked)
         self.ui.tableBlocks.create_fuzzing_label_clicked.connect(self.create_fuzzing_label)
@@ -97,9 +94,34 @@ class GeneratorTabController(QWidget):
         self.ui.listViewProtoLabels.selection_changed.connect(self.handle_label_selection_changed)
         self.ui.listViewProtoLabels.edit_on_item_triggered.connect(self.show_fuzzing_dialog)
 
+
+    @property
+    def selected_block_index(self) -> int:
+        min_row, _, _, _ = self.ui.tableBlocks.selection_range()
+        return min_row#
+
+
+    @property
+    def selected_block(self) -> ProtocolBlock:
+        selected_block_index = self.selected_block_index
+        if selected_block_index == -1:
+            return None
+
+        return self.table_model.protocol.blocks[selected_block_index]
+
+
     @property
     def active_groups(self):
         return self.tree_model.groups
+
+    @property
+    def modulators(self):
+        return self.table_model.protocol.modulators
+
+    @modulators.setter
+    def modulators(self, value):
+        assert type(value) == list
+        self.table_model.protocol.modulators = value
 
     @pyqtSlot()
     def refresh_tree(self):
@@ -110,7 +132,7 @@ class GeneratorTabController(QWidget):
     @pyqtSlot()
     def refresh_table(self):
         self.table_model.update()
-        self.ui.tableBlocks.resize_it()
+        self.ui.tableBlocks.resize_columns()
         is_data_there = self.table_model.display_data is not None and len(self.table_model.display_data) > 0
         self.ui.btnSend.setEnabled(is_data_there)
         self.ui.btnGenerate.setEnabled(is_data_there)
@@ -173,7 +195,7 @@ class GeneratorTabController(QWidget):
             prefix = "Amplitude"
         elif mod_type == "PSK":
             prefix = "Phase"
-        elif mod_type == "FSK":
+        elif mod_type in ("FSK", "GFSK"):
             prefix = "Frequency"
         else:
             prefix = "Unknown Modulation Type (This should not happen...)"
@@ -192,9 +214,9 @@ class GeneratorTabController(QWidget):
                 block = self.table_model.protocol.blocks[min_row]
                 preselected_index = block.modulator_indx
             except IndexError:
-                block = ProtocolBlock([True, False, True, False], 0, [])
+                block = ProtocolBlock([True, False, True, False], 0, [], LabelSet("empty"))
         else:
-            block = ProtocolBlock([True, False, True, False], 0, [])
+            block = ProtocolBlock([True, False, True, False], 0, [], LabelSet("empty"))
             if len(self.table_model.protocol.blocks) > 0:
                 block.bit_len = self.table_model.protocol.blocks[0].bit_len
 
@@ -228,10 +250,12 @@ class GeneratorTabController(QWidget):
         if min_row == -1:
             self.ui.lEncodingValue.setText("-")  #
             self.ui.lEncodingValue.setToolTip("")
+            self.label_list_model.block = None
             return
 
         container = self.table_model.protocol
         block = container.blocks[min_row]
+        self.label_list_model.block = block
         decoder_name = block.decoder.name
         metrics = QFontMetrics(self.ui.lEncodingValue.font())
         elidedName = metrics.elidedText(decoder_name, Qt.ElideRight, self.ui.lEncodingValue.width())
@@ -309,21 +333,13 @@ class GeneratorTabController(QWidget):
     @pyqtSlot(int)
     def show_fuzzing_dialog(self, label_index: int):
         view = self.ui.cbViewType.currentIndex()
-        fdc = FuzzingDialogController(self.table_model.protocol, label_index, view, parent=self)
-        fdc.show()
-        fdc.finished.connect(self.refresh_label_list)
-        fdc.finished.connect(self.refresh_table)
-        fdc.finished.connect(self.set_fuzzing_ui_status)
-
-    @pyqtSlot()
-    def show_epic_fuzzing_dialog(self):
-        view = self.ui.cbViewType.currentIndex()
-        fdc = FuzzingDialogController(self.table_model.protocol, 0, view, parent=self)
-        fdc.enter_epic_mode()
-        fdc.show()
-        fdc.finished.connect(self.refresh_label_list)
-        fdc.finished.connect(self.refresh_table)
-        fdc.finished.connect(self.set_fuzzing_ui_status)
+        if self.selected_block is not None:
+            fdc = FuzzingDialogController(protocol=self.table_model.protocol, label_index=label_index,
+                                          block_index=self.selected_block_index, proto_view=view, parent=self)
+            fdc.show()
+            fdc.finished.connect(self.refresh_label_list)
+            fdc.finished.connect(self.refresh_table)
+            fdc.finished.connect(self.set_fuzzing_ui_status)
 
     @pyqtSlot()
     def handle_plabel_fuzzing_state_changed(self):
@@ -362,7 +378,7 @@ class GeneratorTabController(QWidget):
             self.ui.btnFuzz.setFont(font)
             self.ui.btnFuzz.setStyleSheet("")
 
-        has_same_block = pac.has_fuzz_labels_with_same_block
+        has_same_block = pac.multiple_fuzz_labels_per_block
         self.ui.rBSuccessive.setEnabled(has_same_block)
         self.ui.rBExhaustive.setEnabled(has_same_block)
         self.ui.rbConcurrent.setEnabled(has_same_block)
@@ -383,10 +399,10 @@ class GeneratorTabController(QWidget):
         self.ui.lEstimatedTime.setText(locale.format_string("Estimated Time: %.04f seconds", nsamples / avg_sample_rate))
 
     @pyqtSlot(int, int, int)
-    def create_fuzzing_label(self, refblock: int, start: int, end: int):
+    def create_fuzzing_label(self, block_index: int, start: int, end: int):
         con = self.table_model.protocol
-        start, end = con.convert_range(start, end - 1, self.ui.cbViewType.currentIndex(), 0, False, refblock)
-        lbl = con.create_fuzzing_label(start, end, refblock)
+        start, end = con.convert_range(start, end - 1, self.ui.cbViewType.currentIndex(), 0, False, block_index)
+        lbl = con.create_fuzzing_label(start, end, block_index)
         self.show_fuzzing_dialog(con.protocol_labels.index(lbl))
 
     @pyqtSlot()
@@ -398,25 +414,16 @@ class GeneratorTabController(QWidget):
         maxrow = numpy.max(rows)
 
         label = self.table_model.protocol.protocol_labels[maxrow]
-        if not label.show:
-            return
-        start, end = self.table_model.protocol.get_label_range(label, self.table_model.proto_view,
-                                                                               False)
-
-        # start = int(label.start / factor)
-        # end = math.ceil(label.end / factor)
-        indx = self.table_model.index(0, int((start + end) / 2))
-
-        self.ui.tableBlocks.scrollTo(indx)
+        if label.show and self.selected_block:
+            start, end = self.selected_block.get_label_range(lbl=label, view=self.table_model.proto_view, decode=False)
+            indx = self.table_model.index(0, int((start + end) / 2))
+            self.ui.tableBlocks.scrollTo(indx)
 
     @pyqtSlot()
     def on_view_type_changed(self):
         self.table_model.proto_view = self.ui.cbViewType.currentIndex()
         self.table_model.update()
-        self.ui.tableBlocks.resize_it()
-
-    def refresh_protocol_labels(self):
-        self.table_model.protocol.refresh_protolabel_blocks()
+        self.ui.tableBlocks.resize_columns()
 
     def close_all(self):
         self.tree_model.rootItem.clearChilds()
@@ -444,3 +451,22 @@ class GeneratorTabController(QWidget):
 
         dialog.recording_parameters.connect(self.project_manager.set_recording_parameters)
         dialog.show()
+
+
+    @pyqtSlot()
+    def on_btn_save_clicked(self):
+        filename = FileOperator.get_save_file_name("profile", parent=self, caption="Save fuzz profile")
+        if filename:
+            self.table_model.protocol.to_xml_file(filename)
+
+    def load_from_file(self, filename: str):
+        try:
+            self.table_model.protocol.from_xml_file(filename)
+            self.refresh_pause_list()
+            self.refresh_estimated_time()
+            self.refresh_modulators()
+            self.show_modulation_info()
+            self.refresh_table()
+            self.set_fuzzing_ui_status()
+        except:
+            logger.error("You done something wrong to the xml fuzzing profile.")

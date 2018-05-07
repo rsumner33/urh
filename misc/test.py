@@ -1,23 +1,42 @@
-from PyQt5.QtCore import QObject
+from copy import deepcopy
+
+from PyQt5.QtCore import QObject, pyqtSignal
 
 
-class A(QObject):
-    def __init__(self):
-        self.a = 1
+class Sender(QObject):
+    signal = pyqtSignal(str)
 
-    def __str__(self):
-        return "a"
+    def __init__(self, str):
+        super().__init__()
+        self.a = str
 
-    def __repr__(self):
-        return "a"
+    def emit_signal(self):
+        self.signal.emit(self.a)
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        result.signal = self.signal
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            setattr(result, k, deepcopy(v, memo))
+        #result.signals = LabelSignals()
+        return result
+
+def print1(str):
+    print("1 ", str)
+
+def print2(str):
+    print("2 ", str)
 
 
-l = []
-for _ in range(10):
-    l.append(A())
+o1 = Sender("o1")
+o2 = Sender("o2")
 
-print(l)
-l2 = l
-del l[-1]
-print(l)
-print(l2)
+o1c = deepcopy(o1)
+
+o1.signal.connect(print1)
+o2.signal.connect(print2)
+
+o1c.emit_signal()
+o2.emit_signal()

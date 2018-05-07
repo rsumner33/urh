@@ -23,6 +23,7 @@ class TestProtocolTable(unittest.TestCase):
         QTest.qWait(10)
         self.cframe = self.form.compare_frame_controller
         self.form.ui.tabWidget.setCurrentIndex(1)
+        self.cframe.ui.cbProtoView.setCurrentIndex(0)
 
         proto = self.__build_protocol()
         self.cframe.add_protocol(proto)
@@ -34,7 +35,7 @@ class TestProtocolTable(unittest.TestCase):
 
         self.__add_labels()
         QTest.qWait(10)
-        self.assertEqual(len(self.cframe.groups[0].labels), self.NUM_LABELS)
+        self.assertEqual(len(self.cframe.proto_analyzer.protocol_labels), self.NUM_LABELS)
 
 
     def test_performance(self):
@@ -45,12 +46,12 @@ class TestProtocolTable(unittest.TestCase):
             t = time.time()
             self.cframe.protocol_model.data(indx, role=role)
             microseconds = (time.time()-t)*10**6
-            self.assertLess(microseconds, 20)
+            self.assertLess(microseconds, 25)
 
     def __build_protocol(self):
         result = ProtocolAnalyzer(signal=None)
         for _ in range(self.NUM_BLOCKS):
-            b = ProtocolBlock([True] * self.BITS_PER_BLOCK, pause=1000, bit_alignment_positions=[])
+            b = ProtocolBlock([True] * self.BITS_PER_BLOCK, pause=1000, bit_alignment_positions=[], labelset=result.default_labelset)
             result.blocks.append(b)
         return result
 
@@ -58,7 +59,7 @@ class TestProtocolTable(unittest.TestCase):
         start = 0
         label_len = 3
         for i in range(self.NUM_LABELS):
-            self.cframe.add_protocol_label(start, start+label_len, 0, 0, False, edit_label_name=False)
+            self.cframe.add_protocol_label(start, start+label_len, 0, 0, edit_label_name=False)
             start += label_len +1
 
     def __role_to_str(self, role):

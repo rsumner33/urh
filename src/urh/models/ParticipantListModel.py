@@ -57,5 +57,4 @@ class ParticipantListModel(QAbstractListModel):
         return Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable
 
     def update(self):
-        self.beginResetModel()
-        self.endResetModel()
+        self.layoutChanged.emit()

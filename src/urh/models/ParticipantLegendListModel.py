@@ -46,5 +46,4 @@ class ParticipantLegendListModel(QAbstractListModel):
         return Qt.ItemIsEnabled
 
     def update(self):
-        self.beginResetModel()
-        self.endResetModel()
+        self.layoutChanged.emit()

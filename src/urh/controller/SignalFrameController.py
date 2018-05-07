@@ -42,6 +42,10 @@ class SignalFrameController(QFrame):
         self.ui.setupUi(self)
 
         self.ui.txtEdProto.setFont(FontHelper.getMonospaceFont())
+        self.ui.txtEdProto.participants = project_manager.participants
+        self.ui.txtEdProto.blocks  = proto_analyzer.blocks
+
+        self.ui.gvSignal.participants = project_manager.participants
 
         self.ui.btnMinimize.setIcon(QIcon(":/icons/data/icons/downarrow.png"))
         self.is_minimized = False
@@ -61,6 +65,10 @@ class SignalFrameController(QFrame):
         self.proto_selection_timer = QTimer()  # For Update Proto Selection from ROI
         self.proto_selection_timer.setSingleShot(True)
         self.proto_selection_timer.setInterval(1)
+
+        # Disabled because never used (see also set_protocol_visibilty())
+        self.ui.chkBoxSyncSelection.hide()
+        self.ui.btnMinimize.hide()
 
         if self.signal is not None:
             if self.signal.qad_demod_file_loaded:
@@ -105,15 +113,16 @@ class SignalFrameController(QFrame):
             self.ui.lSamplesInView.setText("{0:n}".format(int(nsamples)))
             self.ui.lSamplesTotal.setText("{0:n}".format(int(nsamples)))
             self.ui.gvSignal.setScene(scene)
+            self.ui.spinBoxSelectionStart.setMaximum(nsamples)
+            self.ui.spinBoxSelectionEnd.setMaximum(nsamples)
             self.ui.btnReplay.hide()
 
             self.create_connects()
+
+            self.ui.gvSignal.sel_area_active = True
+
             self.ui.btnSaveSignal.hide()
             self.minimize_maximize()
-
-    @property
-    def spectrogram_is_active(self) -> bool:
-        return self.ui.stackedWidget.currentWidget() == self.ui.pageSpectrogram
 
     def create_connects(self):
         self.ui.spinBoxSelectionStart.valueChanged.connect(self.set_selection_start)
@@ -144,10 +153,9 @@ class SignalFrameController(QFrame):
             self.signal.name_changed.connect(self.ui.lineEditSignalName.setText)
             self.ui.gvLegend.resized.connect(self.handle_gv_legend_resized)
 
-            self.ui.gvSignal.selection_width_changed.connect(self.start_proto_selection_timer)
+            self.ui.gvSignal.sel_area_width_changed.connect(self.start_proto_selection_timer)
             self.ui.gvSignal.sel_area_start_end_changed.connect(self.start_proto_selection_timer)
             self.proto_selection_timer.timeout.connect(self.update_protocol_selection_from_roi)
-            self.spectrogram_update_timer.timeout.connect(self.on_spectrogram_update_timer_timeout)
 
             self.ui.lineEditSignalName.editingFinished.connect(self.change_signal_name)
             self.proto_analyzer.qt_signals.protocol_updated.connect(self.on_protocol_updated)
@@ -162,7 +170,9 @@ class SignalFrameController(QFrame):
         self.ui.sliderYScale.valueChanged.connect(self.handle_slideryscale_value_changed)
         self.ui.spinBoxXZoom.valueChanged.connect(self.handle_spinbox_xzoom_value_changed)
 
-
+        self.project_manager.project_updated.connect(self.on_participant_changed)
+        self.ui.txtEdProto.participant_changed.connect(self.on_participant_changed)
+        self.ui.gvSignal.participant_changed.connect(self.on_participant_changed)
 
         self.ui.btnInfo.clicked.connect(self.on_info_btn_clicked)
 
@@ -262,7 +272,8 @@ class SignalFrameController(QFrame):
         if checked:
             self.show_protocol()
             self.ui.cbProtoView.setEnabled(True)
-            self.ui.chkBoxSyncSelection.show()
+            # Disabled because never used
+            #self.ui.chkBoxSyncSelection.show()
             self.ui.txtEdProto.show()
         else:
             self.ui.txtEdProto.hide()
@@ -282,7 +293,8 @@ class SignalFrameController(QFrame):
 
         vr = self.ui.gvSignal.view_rect()
         self.scene_creator.init_scene()
-        self.scene_creator.show_scene_section(vr.x(), vr.x() + vr.width())
+        start, end = vr.x(), vr.x() + vr.width()
+        self.scene_creator.show_scene_section(start, end, *self.__get_subpath_ranges_and_colors(start, end))
 
         if ind > 0:
             self.ui.gvLegend.y_scene = self.scene_creator.scene.sceneRect().y()
@@ -338,27 +350,6 @@ class SignalFrameController(QFrame):
     def change_signal_name(self):
         self.signal.name = self.ui.lineEditSignalName.text()
 
-<    def __set_spectrogram_adjust_widgets_visibility(self):
-        self.ui.labelFFTWindowSize.setVisible(self.ui.cbSignalView.currentIndex() == 2)
-        self.ui.sliderFFTWindowSize.setVisible(self.ui.cbSignalView.currentIndex() == 2)
-        self.ui.labelSpectrogramMin.setVisible(self.ui.cbSignalView.currentIndex() == 2)
-        self.ui.labelSpectrogramMax.setVisible(self.ui.cbSignalView.currentIndex() == 2)
-        self.ui.sliderSpectrogramMin.setVisible(self.ui.cbSignalView.currentIndex() == 2)
-        self.ui.sliderSpectrogramMax.setVisible(self.ui.cbSignalView.currentIndex() == 2)
-
-    def __set_selected_bandwidth(self):
-        try:
-            num_samples = int(self.ui.lNumSelectedSamples.text())
-        except ValueError:
-            return
-
-        if self.ui.gvSpectrogram.height_spectrogram and self.signal:
-            bw = (num_samples / self.ui.gvSpectrogram.height_spectrogram) * self.signal.sample_rate
-            self.ui.lDuration.setText(Formatter.big_value_with_suffix(bw) + "Hz")
-
->>>>>>>+HEAD
-======
->>>>>>> b1ae517... Inital Commit
     def __set_duration(self):  # On Signal Sample Rate changed
         try:
             nsamples = int(self.ui.lNumSelectedSamples.text())
@@ -387,30 +378,7 @@ class SignalFrameController(QFrame):
 
     def handle_slideryscale_value_changed(self):
         try:
-<            gv = self.ui.gvSignal if self.ui.stackedWidget.currentIndex() == 0 else self.ui.gvSpectrogram
-            yscale = self.ui.sliderYScale.value()
-            current_factor = gv.sceneRect().height() / gv.view_rect().height()
-            gv.scale(1, yscale / current_factor)
-            x, w = gv.view_rect().x(), gv.view_rect().width()
-            gv.centerOn(x + w / 2, gv.y_center)
-        except ZeroDivisionError:
-            pass
-
-    @pyqtSlot()
-    def on_slider_fft_window_size_value_changed(self):
-        self.spectrogram_update_timer.start()
-
-    @pyqtSlot()
-    def on_slider_spectrogram_min_value_changed(self):
-        self.spectrogram_update_timer.start()
-
-    @pyqtSlot()
-    def on_slider_spectrogram_max_value_changed(self):
-        self.spectrogram_update_timer.start()
-
->>>>>>>+HEAD
-======
-             gvs = self.ui.gvSignal
+            gvs = self.ui.gvSignal
             yscale = self.ui.sliderYScale.value()
             current_factor = gvs.sceneRect().height() / gvs.view_rect().height()
             gvs.scale(1, yscale / current_factor)
@@ -419,8 +387,7 @@ class SignalFrameController(QFrame):
         except ZeroDivisionError:
             pass
 
->>>>>>>-b1ae517
-   def mousePressEvent(self, event):
+    def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.drag_started.emit(self.mapToParent(event.pos()))
             drag = QDrag(self)
@@ -586,7 +553,6 @@ class SignalFrameController(QFrame):
             return
 
         self.protocol_selection_is_updateable = False
-        # TODO Temporär Gruppe anlegen und convert index aufrufen? Oder statische methode in ProtocolGroup.
         sel_start = int(self.proto_analyzer.convert_index(sel_start, old_protoview, self.proto_view, True)[0])
         sel_end = int(math.ceil(self.proto_analyzer.convert_index(sel_end, old_protoview, self.proto_view, True)[1]))
 
@@ -627,7 +593,8 @@ class SignalFrameController(QFrame):
 
     def on_protocol_updated(self):
         self.ui.txtEdProto.setEnabled(True)
-        self.ui.txtEdProto.setPlainText(self.proto_analyzer.plain_to_string(self.proto_view))
+        #self.ui.txtEdProto.setPlainText(self.proto_analyzer.plain_to_string(self.proto_view))
+        self.ui.txtEdProto.setHtml(self.proto_analyzer.plain_to_html(self.proto_view))
 
     def show_protocol(self, old_view=-1, refresh=False):
         if not self.proto_analyzer:
@@ -683,7 +650,8 @@ class SignalFrameController(QFrame):
                     end_block += 1
                     read_pause = False
 
-            self.ui.txtEdProto.setPlainText(self.proto_analyzer.plain_to_string(self.proto_view))
+            self.ui.txtEdProto.setHtml(self.proto_analyzer.plain_to_html(self.proto_view))
+            #self.ui.txtEdProto.setPlainText(self.proto_analyzer.plain_to_string(self.proto_view))
             self.restore_protocol_selection(sel_start, sel_end, start_block, end_block, old_view)
 
             self.ui.txtEdProto.blockSignals(False)
@@ -749,12 +717,9 @@ class SignalFrameController(QFrame):
 
             self.ui.gvSignal.zoom_to_selection(samplepos, samplepos + nsamples)
         else:
-<<<            self.ui.gvSignal.clear_horizontal_selection()
->>>>>>>+HEAD
-====
-               self.ui.gvSignal.set_selection_area(0, 0)
->>>>>>>-b1ae517
-      self.protocol_selection_is_updateable = True
+            self.ui.gvSignal.set_selection_area(0, 0)
+
+        self.protocol_selection_is_updateable = True
         self.update_protocol_selection_from_roi()
 
     @pyqtSlot()
@@ -826,12 +791,8 @@ class SignalFrameController(QFrame):
             else:
                 self.ui.gvSignal.set_selection_area(samplepos, nsamples)
         else:
-<<<            self.ui.gvSignal.clear_horizontal_selection()
->>>>>>>+HEAD
-====
-               self.ui.gvSignal.set_selection_area(0, 0)
->>>>>>>-b1ae517
-     self.ui.gvSignal.blockSignals(False)
+            self.ui.gvSignal.set_selection_area(0, 0)
+        self.ui.gvSignal.blockSignals(False)
 
         self.update_nselected_samples()
 
@@ -880,7 +841,6 @@ class SignalFrameController(QFrame):
             self.ui.txtEdProto.blockSignals(False)
             return
 
-        # TODO: Temporär Gruppe für Convert anlegen? Oder statische Methode in ProtocolGroup hinzufügen
         startindex = int(
             protocol.convert_index(startindex, 0, self.proto_view, True)[0])
         endindex = int(math.ceil(
@@ -1001,7 +961,8 @@ class SignalFrameController(QFrame):
     def display_scene(self):
         self.scene_creator.scene_type = self.ui.cbSignalView.currentIndex()
         vr = self.ui.gvSignal.view_rect()
-        self.scene_creator.show_scene_section(vr.x(), vr.x() + vr.width())
+        start, end = vr.x(), vr.x() + vr.width()
+        self.scene_creator.show_scene_section(start, end, *self.__get_subpath_ranges_and_colors(start, end))
 
     def delete_from_protocol_selection(self):
         if not self.ui.gvSignal.selection_area.is_empty:
@@ -1075,13 +1036,6 @@ class SignalFrameController(QFrame):
             self.ui.btnSaveSignal.hide()
         self.ui.lineEditSignalName.setFont(font)
 
-    def redraw_after_resize(self):
-        if self.ui.gvSignal.view_rect().width() > self.ui.gvSignal.sceneRect().width():
-            x_factor = self.ui.gvSignal.width() / self.ui.gvSignal.sceneRect().width()
-            self.ui.gvSignal.scale(x_factor / self.ui.gvSignal.transform().m11(), 1)
-
-        self.ui.gvSignal.autofit_view()
-
     def contextMenuEvent(self, event: QContextMenuEvent):
         if self.signal is None:
             return
@@ -1118,11 +1072,46 @@ class SignalFrameController(QFrame):
                 continue
 
     def on_signal_scrolled(self):
-        self.redraw_signal()
+        self.redraw_timer.start(0)
 
     def redraw_signal(self):
         vr = self.ui.gvSignal.view_rect()
-        self.scene_creator.show_scene_section(vr.x(), vr.x() + vr.width())
+        start, end = vr.x(), vr.x() + vr.width()
+        self.scene_creator.show_scene_section(start, end, *self.__get_subpath_ranges_and_colors(start, end))
+
+    def __get_subpath_ranges_and_colors(self, start: float, end: float):
+        subpath_ranges = []
+        colors = []
+        start = int(start)
+        end = int(end) if end == int(end) else int(end) + 1
+
+        for block in self.proto_analyzer.blocks:
+            if block.bit_sample_pos[-2] < start:
+                continue
+
+            color = None if block.participant is None else constants.PARTICIPANT_COLORS[block.participant.color_index]
+
+            # Append the pause until first bit of block
+            subpath_ranges.append((start, block.bit_sample_pos[0]))
+            if start < block.bit_sample_pos[0]:
+                colors.append(None)
+            else:
+                colors.append(color) # Zoomed inside a block
+
+            if block.bit_sample_pos[-2] > end:
+                subpath_ranges.append((block.bit_sample_pos[0], end))
+                colors.append(color)
+                break
+
+            # Data part of the block
+            subpath_ranges.append((block.bit_sample_pos[0], block.bit_sample_pos[-2]))
+            colors.append(color)
+
+            start = block.bit_sample_pos[-2] + 1
+
+        subpath_ranges = subpath_ranges if subpath_ranges else None
+        colors = colors if colors else None
+        return subpath_ranges, colors
 
     def on_spinBoxNoiseTreshold_editingFinished(self):
         if self.signal is not None and self.signal.noise_treshold != self.ui.spinBoxNoiseTreshold.value():
@@ -1153,8 +1142,9 @@ class SignalFrameController(QFrame):
         """
         if self.signal.auto_detect_on_modulation_changed:
             self.signal.auto_detect_on_modulation_changed = False
-<<<<<<            self.ui.btnAutoDetect.setChecked(False)
->>>>>>>+HEAD
-=
             self.ui.btnAutoDetect.setChecked(False)
->>>>>>> b1ae517... Inital Commit
+
+    def on_participant_changed(self):
+        if self.proto_analyzer.blocks is not None:
+            self.redraw_signal()
+            self.on_protocol_updated()

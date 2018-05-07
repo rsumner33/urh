@@ -1,9 +1,8 @@
 from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtGui import QDragEnterEvent, QDropEvent
+from PyQt5.QtGui import QDropEvent
 
+from urh.SignalSceneManager import SignalSceneManager
 from urh.signalprocessing.ProtocolAnalyzer import ProtocolAnalyzer
-from urh.signalprocessing.Signal import Signal
-from urh.ui.painting.SignalSceneManager import SignalSceneManager
 from urh.ui.views.ZoomableGraphicView import ZoomableGraphicView
 
 
@@ -11,20 +10,23 @@ class ZoomAndDropableGraphicView(ZoomableGraphicView):
     signal_loaded = pyqtSignal(ProtocolAnalyzer)
 
     def __init__(self, parent=None):
-        self.signal_tree_root = None  # type: ProtocolTreeItem
-        self.scene_manager = None
+        self.scene_creator = None
+        """:type: SignalSceneManager """
+        self.signal_tree_root = None
+        """type signal_tree_root: ProtocolTreeItem"""
 
-        self.signal = None  # type: Signal
-        self.proto_analyzer = None  # type: ProtocolAnalyzer
+        self.signal = None
+        self.proto_analyzer = None
 
         super().__init__(parent)
 
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        event.acceptProposedAction()
+
+    def dragEnterEvent(self, QDragEnterEvent):
+        QDragEnterEvent.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent):
-        mime_data = event.mimeData()
-        data_str = str(mime_data.text())
+        mimedata = event.mimeData()
+        data_str = str(mimedata.text())
         indexes = list(data_str.split("/")[:-1])
 
         signal = None
@@ -50,23 +52,6 @@ class ZoomAndDropableGraphicView(ZoomableGraphicView):
         if signal is None:
             return
 
-        self.signal = signal  # type: Signal
-        self.proto_analyzer = proto_analyzer  # type: ProtocolAnalyzer
-
-        self.scene_manager = SignalSceneManager(signal, self)
-        self.plot_data(self.signal.real_plot_data)
-        self.show_full_scene()
-        self.auto_fit_view()
-
-        self.signal_loaded.emit(self.proto_analyzer)
-
-    def eliminate(self):
-        # Do _not_ call eliminate() for self.signal and self.proto_analyzer
-        # as these are references to the original data!
-        self.signal = None
-        self.proto_analyzer = None
-        self.signal_tree_root = None
-        super().eliminate()
         self.horizontalScrollBar().blockSignals(True)
 
         self.scene_creator = SignalSceneManager(signal, self)

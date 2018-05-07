@@ -67,45 +67,16 @@
      <property name="sizeConstraint">
       <enum>QLayout::SetFixedSize</enum>
      </property>
-     <item row="12" column="0">
-      <widget class="QPushButton" name="btnReplay">
-       <property name="text">
-        <string>Replay signal...</string>
-       </property>
-       <property name="icon">
-        <iconset theme="media-playback-start">
-         <normaloff>.</normaloff>.</iconset>
-       </property>
-      </widget>
-     </item>
-     <item row="14" column="0">
-      <widget class="QCheckBox" name="chkBoxShowProtocol">
+     <item row="19" column="0">
+      <widget class="QCheckBox" name="chkBoxSyncSelection">
        <property name="toolTip">
-        <string>Show the extracted protocol based on the parameters InfoLen, PauseLen and ZeroTreshold (in QuadratureDemod-View).
-
-If you want your protocol to be better seperated, edit the PauseLen using right-click menu from a selection in SignalView or ProtocolView.</string>
+        <string>If this is set to true, your selected protocol bits will show up in the signal view, and vice versa.</string>
        </property>
        <property name="text">
-        <string>Show Signal as</string>
+        <string>Sync Selection</string>
        </property>
-      </widget>
-     </item>
-     <item row="18" column="1">
-      <widget class="QSlider" name="sliderSpectrogramMin">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="minimum">
-        <number>-150</number>
-       </property>
-       <property name="maximum">
-        <number>10</number>
-       </property>
-       <property name="orientation">
-        <enum>Qt::Horizontal</enum>
+       <property name="checked">
+        <bool>true</bool>
        </property>
       </widget>
      </item>
@@ -125,18 +96,17 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
        </property>
       </widget>
      </item>
-     <item row="13" column="0">
-      <spacer name="verticalSpacer">
-       <property name="orientation">
-        <enum>Qt::Vertical</enum>
+     <item row="18" column="0">
+      <widget class="QCheckBox" name="chkBoxShowProtocol">
+       <property name="toolTip">
+        <string>Show the extracted protocol based on the parameters InfoLen, PauseLen and ZeroTreshold (in QuadratureDemod-View).
+
+If you want your protocol to be better seperated, edit the PauseLen using right-click menu from a selection in SignalView or ProtocolView.</string>
        </property>
-       <property name="sizeHint" stdset="0">
-        <size>
-         <width>20</width>
-         <height>40</height>
-        </size>
+       <property name="text">
+        <string>Show Signal as</string>
        </property>
-      </spacer>
+      </widget>
      </item>
      <item row="2" column="0">
       <widget class="QLabel" name="label">
@@ -182,25 +152,6 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
        </property>
       </widget>
      </item>
-     <item row="20" column="1">
-      <widget class="QComboBox" name="cbProtoView">
-       <item>
-        <property name="text">
-         <string>Bits</string>
-        </property>
-       </item>
-       <item>
-        <property name="text">
-         <string>Hex</string>
-        </property>
-       </item>
-       <item>
-        <property name="text">
-         <string>ASCII</string>
-        </property>
-       </item>
-      </widget>
-     </item>
      <item row="4" column="0">
       <widget class="QLabel" name="lInfoLenText">
        <property name="sizePolicy">
@@ -239,6 +190,28 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
        </property>
       </widget>
      </item>
+     <item row="7" column="1">
+      <widget class="QSpinBox" name="spinBoxTolerance">
+       <property name="minimumSize">
+        <size>
+         <width>100</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="maximumSize">
+        <size>
+         <width>16777215</width>
+         <height>16777215</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;This is the error tolerance for determining the &lt;span style=&quot; font-weight:600;&quot;&gt;pulse lengths&lt;/span&gt; in the demodulated signal.&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; text-decoration: underline;&quot;&gt;Example:&lt;/span&gt; Say, we are reading a ones pulse and the tolerance value was set to 5. Then 5 errors (which must follow sequentially) are accepted.&lt;/p&gt;&lt;p&gt;Tune this value if you have &lt;span style=&quot; font-weight:600;&quot;&gt;spiky data&lt;/span&gt; after demodulation.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+       </property>
+       <property name="maximum">
+        <number>9999</number>
+       </property>
+      </widget>
+     </item>
      <item row="7" column="0">
       <widget class="QLabel" name="lErrorTolerance">
        <property name="sizePolicy">
@@ -267,7 +240,7 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
        </property>
       </widget>
      </item>
-     <item row="10" column="0">
+     <item row="13" column="0">
       <widget class="QLabel" name="lSignalViewText">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
@@ -277,7 +250,7 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
        </property>
        <property name="font">
         <font>
-         <underline>true</underline>
+         <underline>false</underline>
         </font>
        </property>
        <property name="text">
@@ -285,29 +258,7 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
        </property>
       </widget>
      </item>
-     <item row="7" column="1">
-      <widget class="QSpinBox" name="spinBoxTolerance">
-       <property name="minimumSize">
-        <size>
-         <width>100</width>
-         <height>0</height>
-        </size>
-       </property>
-       <property name="maximumSize">
-        <size>
-         <width>16777215</width>
-         <height>16777215</height>
-        </size>
-       </property>
-       <property name="toolTip">
-        <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;This is the error tolerance for determining the &lt;span style=&quot; font-weight:600;&quot;&gt;pulse lengths&lt;/span&gt; in the demodulated signal.&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; text-decoration: underline;&quot;&gt;Example:&lt;/span&gt; Say, we are reading a ones pulse and the tolerance value was set to 5. Then 5 errors (which must follow sequentially) are accepted.&lt;/p&gt;&lt;p&gt;Tune this value if you have &lt;span style=&quot; font-weight:600;&quot;&gt;spiky data&lt;/span&gt; after demodulation.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-       </property>
-       <property name="maximum">
-        <number>9999</number>
-       </property>
-      </widget>
-     </item>
-     <item row="14" column="1">
+     <item row="18" column="1">
       <widget class="QComboBox" name="cbProtoView">
        <item>
         <property name="text">
@@ -326,22 +277,9 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
        </item>
       </widget>
      </item>
-     <item row="15" column="0">
-      <widget class="QCheckBox" name="chkBoxSyncSelection">
-       <property name="toolTip">
-        <string>If this is set to true, your selected protocol bits will show up in the signal view, and vice versa.</string>
-       </property>
-       <property name="text">
-        <string>Sync Selection</string>
-       </property>
-       <property name="checked">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
      <item row="0" column="0" colspan="2">
       <layout class="QGridLayout" name="gridLayout">
-       <item row="0" column="5">
+       <item row="0" column="9">
         <widget class="QToolButton" name="btnMinimize">
          <property name="sizePolicy">
           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -412,7 +350,7 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
          </property>
         </spacer>
        </item>
-       <item row="0" column="6">
+       <item row="0" column="10">
         <widget class="QToolButton" name="btnCloseSignal">
          <property name="sizePolicy">
           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
@@ -479,7 +417,7 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
          </property>
         </widget>
        </item>
-       <item row="0" column="4">
+       <item row="0" column="6">
         <widget class="QToolButton" name="btnInfo">
          <property name="minimumSize">
           <size>
@@ -498,6 +436,32 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
          </property>
          <property name="icon">
           <iconset theme="dialog-information">
+           <normaloff>.</normaloff>.</iconset>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="5">
+        <widget class="QToolButton" name="btnReplay">
+         <property name="minimumSize">
+          <size>
+           <width>24</width>
+           <height>24</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>24</width>
+           <height>24</height>
+          </size>
+         </property>
+         <property name="toolTip">
+          <string>Replay signal</string>
+         </property>
+         <property name="text">
+          <string/>
+         </property>
+         <property name="icon">
+          <iconset theme="media-playback-start">
            <normaloff>.</normaloff>.</iconset>
          </property>
         </widget>
@@ -566,7 +530,7 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
        </property>
       </widget>
      </item>
-     <item row="11" column="0" colspan="2">
+     <item row="14" column="0" colspan="2">
       <widget class="QComboBox" name="cbSignalView">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
@@ -597,20 +561,69 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
          <string>PSK demodulated</string>
         </property>
        </item>
-       <item>
-        <property name="text">
-         <string>QAM (ASK+PSK) demodulated</string>
-        </property>
-       </item>
       </widget>
      </item>
-     <item row="10" column="1">
+     <item row="9" column="0">
+      <widget class="QLabel" name="label_2">
+       <property name="text">
+        <string>Modulation:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="9" column="1">
+      <widget class="QLabel" name="labelModulation">
+       <property name="text">
+        <string>FSK</string>
+       </property>
+      </widget>
+     </item>
+     <item row="17" column="0">
+      <spacer name="verticalSpacer">
+       <property name="orientation">
+        <enum>Qt::Vertical</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>20</width>
+         <height>40</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item row="11" column="0" colspan="2">
+      <widget class="Line" name="line">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+      </widget>
+     </item>
+     <item row="16" column="0" colspan="2">
+      <widget class="Line" name="line_2">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+      </widget>
+     </item>
+     <item row="10" column="0">
+      <spacer name="verticalSpacer_2">
+       <property name="orientation">
+        <enum>Qt::Vertical</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>20</width>
+         <height>40</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item row="15" column="0" colspan="2">
       <widget class="QPushButton" name="btnAutoDetect">
        <property name="toolTip">
         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Automatically detect Center and Bit Length, when you change the demodulation type. You can disable this behaviour for faster switching between demodulations.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
        </property>
        <property name="text">
-        <string>Auto-Detect</string>
+        <string>Autodetect parameters</string>
        </property>
        <property name="icon">
         <iconset theme="system-software-update">
@@ -627,20 +640,6 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
        </property>
        <property name="checked">
         <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item row="9" column="0">
-      <widget class="QLabel" name="label_2">
-       <property name="text">
-        <string>Modulation:</string>
-       </property>
-      </widget>
-     </item>
-     <item row="9" column="1">
-      <widget class="QLabel" name="labelModulation">
-       <property name="text">
-        <string>FSK</string>
        </property>
       </widget>
      </item>
@@ -678,201 +677,132 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
         <number>0</number>
        </property>
        <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_2">
+        <layout class="QHBoxLayout" name="horizontalLayout_4">
          <item>
-          <widget class="QStackedWidget" name="stackedWidget">
-           <property name="lineWidth">
+          <layout class="QHBoxLayout" name="horizontalLayout_2">
+           <property name="spacing">
             <number>0</number>
            </property>
-           <property name="currentIndex">
-            <number>0</number>
-           </property>
-           <widget class="QWidget" name="pageSignal">
-            <layout class="QHBoxLayout" name="horizontalLayout_6">
-             <property name="spacing">
-              <number>0</number>
+           <item>
+            <widget class="LegendGraphicView" name="gvLegend">
+             <property name="minimumSize">
+              <size>
+               <width>0</width>
+               <height>150</height>
+              </size>
              </property>
-             <property name="leftMargin">
-              <number>0</number>
+             <property name="maximumSize">
+              <size>
+               <width>30</width>
+               <height>16777215</height>
+              </size>
              </property>
-             <property name="topMargin">
-              <number>0</number>
+             <property name="frameShape">
+              <enum>QFrame::NoFrame</enum>
              </property>
-             <property name="rightMargin">
-              <number>0</number>
+             <property name="verticalScrollBarPolicy">
+              <enum>Qt::ScrollBarAlwaysOff</enum>
              </property>
-             <property name="bottomMargin">
-              <number>0</number>
+             <property name="horizontalScrollBarPolicy">
+              <enum>Qt::ScrollBarAlwaysOn</enum>
              </property>
-             <item>
-              <widget class="LegendGraphicView" name="gvLegend">
-               <property name="minimumSize">
-                <size>
-                 <width>0</width>
-                 <height>150</height>
-                </size>
-               </property>
-               <property name="maximumSize">
-                <size>
-                 <width>30</width>
-                 <height>16777215</height>
-                </size>
-               </property>
-               <property name="frameShape">
-                <enum>QFrame::NoFrame</enum>
-               </property>
-               <property name="verticalScrollBarPolicy">
-                <enum>Qt::ScrollBarAlwaysOff</enum>
-               </property>
-               <property name="horizontalScrollBarPolicy">
-                <enum>Qt::ScrollBarAlwaysOn</enum>
-               </property>
-               <property name="interactive">
-                <bool>false</bool>
-               </property>
-               <property name="resizeAnchor">
-                <enum>QGraphicsView::AnchorViewCenter</enum>
-               </property>
-               <property name="rubberBandSelectionMode">
-                <enum>Qt::ContainsItemShape</enum>
-               </property>
-               <property name="optimizationFlags">
-                <set>QGraphicsView::DontSavePainterState</set>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="EpicGraphicView" name="gvSignal">
-               <property name="enabled">
-                <bool>true</bool>
-               </property>
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-                 <horstretch>0</horstretch>
-                 <verstretch>0</verstretch>
-                </sizepolicy>
-               </property>
-               <property name="minimumSize">
-                <size>
-                 <width>0</width>
-                 <height>150</height>
-                </size>
-               </property>
-               <property name="maximumSize">
-                <size>
-                 <width>16777215</width>
-                 <height>16777215</height>
-                </size>
-               </property>
-               <property name="mouseTracking">
-                <bool>true</bool>
-               </property>
-               <property name="focusPolicy">
-                <enum>Qt::WheelFocus</enum>
-               </property>
-               <property name="contextMenuPolicy">
-                <enum>Qt::DefaultContextMenu</enum>
-               </property>
-               <property name="autoFillBackground">
-                <bool>false</bool>
-               </property>
-               <property name="styleSheet">
-                <string notr="true"/>
-               </property>
-               <property name="frameShape">
-                <enum>QFrame::NoFrame</enum>
-               </property>
-               <property name="frameShadow">
-                <enum>QFrame::Raised</enum>
-               </property>
-               <property name="verticalScrollBarPolicy">
-                <enum>Qt::ScrollBarAlwaysOff</enum>
-               </property>
-               <property name="horizontalScrollBarPolicy">
-                <enum>Qt::ScrollBarAlwaysOn</enum>
-               </property>
-               <property name="interactive">
-                <bool>false</bool>
-               </property>
-               <property name="renderHints">
-                <set>QPainter::Antialiasing|QPainter::TextAntialiasing</set>
-               </property>
-               <property name="dragMode">
-                <enum>QGraphicsView::NoDrag</enum>
-               </property>
-               <property name="cacheMode">
-                <set>QGraphicsView::CacheNone</set>
-               </property>
-               <property name="transformationAnchor">
-                <enum>QGraphicsView::NoAnchor</enum>
-               </property>
-               <property name="resizeAnchor">
-                <enum>QGraphicsView::NoAnchor</enum>
-               </property>
-               <property name="viewportUpdateMode">
-                <enum>QGraphicsView::MinimalViewportUpdate</enum>
-               </property>
-               <property name="rubberBandSelectionMode">
-                <enum>Qt::ContainsItemShape</enum>
-               </property>
-               <property name="optimizationFlags">
-                <set>QGraphicsView::DontClipPainter|QGraphicsView::DontSavePainterState</set>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </widget>
-           <widget class="QWidget" name="pageSpectrogram">
-            <layout class="QHBoxLayout" name="horizontalLayout_4">
-             <property name="spacing">
-              <number>0</number>
+             <property name="interactive">
+              <bool>false</bool>
              </property>
-             <property name="leftMargin">
-              <number>0</number>
+             <property name="resizeAnchor">
+              <enum>QGraphicsView::AnchorViewCenter</enum>
              </property>
-             <property name="topMargin">
-              <number>0</number>
+             <property name="rubberBandSelectionMode">
+              <enum>Qt::ContainsItemShape</enum>
              </property>
-             <property name="rightMargin">
-              <number>0</number>
+             <property name="optimizationFlags">
+              <set>QGraphicsView::DontSavePainterState</set>
              </property>
-             <property name="bottomMargin">
-              <number>0</number>
+            </widget>
+           </item>
+           <item>
+            <widget class="EpicGraphicView" name="gvSignal">
+             <property name="enabled">
+              <bool>true</bool>
              </property>
-             <item>
-              <widget class="SpectrogramGraphicView" name="gvSpectrogram">
-               <property name="mouseTracking">
-                <bool>true</bool>
-               </property>
-               <property name="frameShape">
-                <enum>QFrame::NoFrame</enum>
-               </property>
-               <property name="interactive">
-                <bool>false</bool>
-               </property>
-               <property name="renderHints">
-                <set>QPainter::TextAntialiasing</set>
-               </property>
-               <property name="cacheMode">
-                <set>QGraphicsView::CacheNone</set>
-               </property>
-               <property name="transformationAnchor">
-                <enum>QGraphicsView::NoAnchor</enum>
-               </property>
-               <property name="viewportUpdateMode">
-                <enum>QGraphicsView::MinimalViewportUpdate</enum>
-               </property>
-               <property name="optimizationFlags">
-                <set>QGraphicsView::DontClipPainter|QGraphicsView::DontSavePainterState</set>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </widget>
-          </widget>
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>0</width>
+               <height>150</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>16777215</width>
+               <height>16777215</height>
+              </size>
+             </property>
+             <property name="mouseTracking">
+              <bool>true</bool>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::WheelFocus</enum>
+             </property>
+             <property name="contextMenuPolicy">
+              <enum>Qt::DefaultContextMenu</enum>
+             </property>
+             <property name="autoFillBackground">
+              <bool>false</bool>
+             </property>
+             <property name="styleSheet">
+              <string notr="true"/>
+             </property>
+             <property name="frameShape">
+              <enum>QFrame::NoFrame</enum>
+             </property>
+             <property name="frameShadow">
+              <enum>QFrame::Raised</enum>
+             </property>
+             <property name="verticalScrollBarPolicy">
+              <enum>Qt::ScrollBarAlwaysOff</enum>
+             </property>
+             <property name="horizontalScrollBarPolicy">
+              <enum>Qt::ScrollBarAlwaysOn</enum>
+             </property>
+             <property name="interactive">
+              <bool>false</bool>
+             </property>
+             <property name="renderHints">
+              <set>QPainter::Antialiasing|QPainter::TextAntialiasing</set>
+             </property>
+             <property name="dragMode">
+              <enum>QGraphicsView::NoDrag</enum>
+             </property>
+             <property name="cacheMode">
+              <set>QGraphicsView::CacheNone</set>
+             </property>
+             <property name="transformationAnchor">
+              <enum>QGraphicsView::NoAnchor</enum>
+             </property>
+             <property name="resizeAnchor">
+              <enum>QGraphicsView::NoAnchor</enum>
+             </property>
+             <property name="viewportUpdateMode">
+              <enum>QGraphicsView::MinimalViewportUpdate</enum>
+             </property>
+             <property name="rubberBandSelectionMode">
+              <enum>Qt::ContainsItemShape</enum>
+             </property>
+             <property name="optimizationFlags">
+              <set>QGraphicsView::DontClipPainter|QGraphicsView::DontSavePainterState</set>
+             </property>
+            </widget>
+           </item>
+          </layout>
          </item>
          <item>
-          <layout class="QVBoxLayout" name="verticalLayout_5">
+          <layout class="QVBoxLayout" name="verticalLayout_2">
            <item>
             <widget class="QLabel" name="lYScale">
              <property name="locale">
@@ -1158,18 +1088,6 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
       <property name="acceptDrops">
        <bool>false</bool>
       </property>
-      <property name="undoRedoEnabled">
-       <bool>false</bool>
-      </property>
-      <property name="lineWrapMode">
-       <enum>QPlainTextEdit::NoWrap</enum>
-      </property>
-      <property name="readOnly">
-       <bool>true</bool>
-      </property>
-      <property name="textInteractionFlags">
-       <set>Qt::TextSelectableByKeyboard|Qt::TextSelectableByMouse</set>
-      </property>
      </widget>
     </widget>
    </item>
@@ -1188,20 +1106,18 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
   </customwidget>
   <customwidget>
    <class>TextEditProtocolView</class>
-   <extends>QPlainTextEdit</extends>
+   <extends>QTextEdit</extends>
    <header>urh.ui.views.TextEditProtocolView.h</header>
-  </customwidget>
-  <customwidget>
-   <class>SpectrogramGraphicView</class>
-   <extends>QGraphicsView</extends>
-   <header>urh.ui.views.SpectrogramGraphicView.h</header>
   </customwidget>
  </customwidgets>
  <tabstops>
-  <tabstop>btnMinimize</tabstop>
   <tabstop>btnSaveSignal</tabstop>
+  <tabstop>btnInfo</tabstop>
+  <tabstop>btnMinimize</tabstop>
   <tabstop>btnCloseSignal</tabstop>
   <tabstop>lineEditSignalName</tabstop>
+  <tabstop>spinBoxNoiseTreshold</tabstop>
+  <tabstop>spinBoxCenterOffset</tabstop>
   <tabstop>spinBoxInfoLen</tabstop>
   <tabstop>spinBoxTolerance</tabstop>
   <tabstop>cbSignalView</tabstop>
@@ -1209,9 +1125,13 @@ If you want your protocol to be better seperated, edit the PauseLen using right-
   <tabstop>cbProtoView</tabstop>
   <tabstop>chkBoxSyncSelection</tabstop>
   <tabstop>txtEdProto</tabstop>
+  <tabstop>gvLegend</tabstop>
+  <tabstop>gvSignal</tabstop>
+  <tabstop>sliderYScale</tabstop>
   <tabstop>btnShowHideStartEnd</tabstop>
   <tabstop>spinBoxSelectionStart</tabstop>
   <tabstop>spinBoxSelectionEnd</tabstop>
+  <tabstop>spinBoxXZoom</tabstop>
  </tabstops>
  <resources>
   <include location="../urh.qrc"/>

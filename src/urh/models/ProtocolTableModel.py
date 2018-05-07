@@ -1,6 +1,7 @@
 from collections import defaultdict
 
 from PyQt5.QtCore import pyqtSignal, QModelIndex, Qt
+from PyQt5.QtGui import QColor
 
 from urh import constants
 from urh.models.TableModel import TableModel
@@ -12,11 +13,12 @@ from urh.ui.actions.DeleteBitsAndPauses import DeleteBitsAndPauses
 class ProtocolTableModel(TableModel):
     ref_index_changed = pyqtSignal(int)
 
-    def __init__(self, proto_analyzer: ProtocolAnalyzer, controller, parent=None):
+    def __init__(self, proto_analyzer: ProtocolAnalyzer, participants, controller, parent=None):
         super().__init__(parent)
 
         self.controller = controller
         self.protocol = proto_analyzer
+        self.participants = participants
 
         self.active_group_ids = [0]
 
@@ -35,8 +37,19 @@ class ProtocolTableModel(TableModel):
             self.update()
             self.ref_index_changed.emit(self._refindex)
 
-    def addProtoLabel(self, start, end, blocknr, restrictive):
-        self.controller.add_protocol_label(start, end, blocknr, self.proto_view, restrictive)
+
+    def headerData(self, section: int, orientation, role=Qt.DisplayRole):
+        if role == Qt.DisplayRole and orientation == Qt.Vertical and self.protocol.blocks[section].participant:
+            return  "{0} ({1})".format(section + 1, self.protocol.blocks[section].participant.shortname)
+
+        if role == Qt.BackgroundColorRole and orientation == Qt.Vertical and self.protocol.blocks[section].participant:
+            return constants.PARTICIPANT_COLORS[self.protocol.blocks[section].participant.color_index]
+
+
+        return super().headerData(section, orientation, role)
+
+    def addProtoLabel(self, start, end, blocknr):
+        self.controller.add_protocol_label(start, end, blocknr, self.proto_view)
 
     def refresh_fonts(self):
         self.bold_fonts.clear()

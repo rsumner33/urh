@@ -1,4 +1,3 @@
-import csv
 import os
 import struct
 import tarfile
@@ -10,40 +9,39 @@ from PyQt5.QtWidgets import QApplication
 
 import urh.cythonext.signalFunctions as signal_functions
 from urh import constants
-from urh.signalprocessing.Filter import Filter
 from urh.util import FileOperator
 from urh.util.Logger import logger
-import math
+
 
 class Signal(QObject):
     """
     Representation of a loaded signal (complex file).
     """
 
+
     MODULATION_TYPES = ["ASK", "FSK", "PSK", "QAM"]
 
     bit_len_changed = pyqtSignal(int)
     tolerance_changed = pyqtSignal(int)
-    noise_threshold_changed = pyqtSignal()
+    noise_treshold_changed = pyqtSignal()
     qad_center_changed = pyqtSignal(float)
     name_changed = pyqtSignal(str)
     sample_rate_changed = pyqtSignal(float)
-    modulation_type_changed = pyqtSignal(int)
+    modulation_type_changed = pyqtSignal()
 
     saved_status_changed = pyqtSignal()
     protocol_needs_update = pyqtSignal()
-    data_edited = pyqtSignal()  # On Crop/Mute/Delete etc.
+    full_refresh_needed = pyqtSignal()  # On Crop/Mute/Delete etc.
 
-    def __init__(self, filename: str, name: str, modulation: str = None, sample_rate: float = 1e6, parent=None):
+    def __init__(self, filename: str, name: str, wav_is_qad_demod=False,
+                 modulation: str = None, sample_rate: float = 1e6, parent=None):
         super().__init__(parent)
         self.__name = name
         self.__tolerance = 5
         self.__bit_len = 100
-        self.__pause_threshold = 8
-        self.__message_length_divisor = 1
         self._qad = None
         self.__qad_center = 0
-        self._noise_threshold = 0
+        self._noise_treshold = 0
         self.__sample_rate = sample_rate
         self.noise_min_plot = 0
         self.noise_max_plot = 0
@@ -52,12 +50,51 @@ class Signal(QObject):
         self.auto_detect_on_modulation_changed = True
         self.wav_mode = filename.endswith(".wav")
         self.__changed = False
+        self.qad_demod_file_loaded = wav_is_qad_demod
         if modulation is None:
             modulation = "FSK"
         self.__modulation_type = self.MODULATION_TYPES.index(modulation)
         self.__parameter_cache = {mod: {"qad_center": None, "bit_len": None} for mod in self.MODULATION_TYPES}
 
         if len(filename) > 0:
+            # Daten auslesen
+            if not self.wav_mode:
+                if not filename.endswith(".coco"):
+                    self._fulldata = np.fromfile(filename, dtype=np.complex64)  # Uncompressed
+                else:
+                    obj = tarfile.open(filename, "r")
+                    members = obj.getmembers()
+                    obj.extract(members[0], QDir.tempPath())
+                    extracted_filename = os.path.join(QDir.tempPath(), obj.getnames()[0])
+                    self._fulldata = np.fromfile(extracted_filename, dtype=np.complex64)
+                    os.remove(extracted_filename)
+
+                self._fulldata = np.ascontiguousarray(self._fulldata, dtype=np.complex64)
+            else:
+                f = wave.open(filename, "r")
+                n = f.getnframes()
+                unsigned_bytes = struct.unpack('<{0:d}B'.format(n), f.readframes(n))
+                if not self.qad_demod_file_loaded:
+                    # Complex To Real WAV File load
+                    self._fulldata = np.empty(n, dtype=np.complex64, order="C")
+                    self._fulldata.real = np.multiply(1/256, np.subtract(unsigned_bytes, 128))
+                    self._fulldata.imag = [-1/128] * n
+                else:
+                    self._fulldata = np.multiply(1 / 256, np.subtract(unsigned_bytes, 128).astype(np.int8)).astype(
+                        np.float32)
+                    self._fulldata = np.ascontiguousarray(self._fulldata, dtype=np.float32)
+
+                f.close()
+
+            self.filename = filename
+            self._num_samples = len(self._fulldata)
+
+            if not self.qad_demod_file_loaded:
+                self.calc_noise_treshold(int(0.99 * self.num_samples), self.num_samples)
+
+        else:
+            self._num_samples = -1
+            self.filename = ""
 
     @property
     def sample_rate(self):
@@ -68,6 +105,7 @@ class Signal(QObject):
         if val != self.sample_rate:
             self.__sample_rate = val
             self.sample_rate_changed.emit(val)
+
 
     @property
     def parameter_cache(self) -> dict:
@@ -102,7 +140,7 @@ class Signal(QObject):
             if self.auto_detect_on_modulation_changed:
                 self.auto_detect(emit_update=False)
 
-            self.modulation_type_changed.emit(self.__modulation_type)
+            self.modulation_type_changed.emit()
             if not self.block_protocol_update:
                 self.protocol_needs_update.emit()
 
@@ -147,28 +185,6 @@ class Signal(QObject):
                 self.protocol_needs_update.emit()
 
     @property
-    def pause_threshold(self) -> int:
-        return self.__pause_threshold
-
-    @pause_threshold.setter
-    def pause_threshold(self, value: int):
-        if self.__pause_threshold != value:
-            self.__pause_threshold = value
-            if not self.block_protocol_update:
-                self.protocol_needs_update.emit()
-
-    @property
-    def message_length_divisor(self) -> int:
-        return self.__message_length_divisor
-
-    @message_length_divisor.setter
-    def message_length_divisor(self, value: int):
-        if self.__message_length_divisor != value:
-            self.__message_length_divisor = value
-            if not self.block_protocol_update:
-                self.protocol_needs_update.emit()
-
-    @property
     def name(self):
         return self.__name
 
@@ -177,31 +193,32 @@ class Signal(QObject):
         if value != self.__name:
             self.__name = value
             self.name_changed.emit(self.__name)
-
     @property
     def num_samples(self):
-        return len(self.data)
+        if self._num_samples == -1:
+            self._num_samples = len(self.data)
+        return self._num_samples
 
     @property
-    def noise_threshold(self):
-        return self._noise_threshold
+    def noise_treshold(self):
+        return self._noise_treshold
 
-    @noise_threshold.setter
-    def noise_threshold(self, value):
-        if value != self.noise_threshold:
+    @noise_treshold.setter
+    def noise_treshold(self, value):
+        if value != self.noise_treshold:
             self._qad = None
             self.clear_parameter_cache()
-            self._noise_threshold = value
+            self._noise_treshold = value
             self.noise_min_plot = -value
             self.noise_max_plot = value
-            self.noise_threshold_changed.emit()
+            self.noise_treshold_changed.emit()
             if not self.block_protocol_update:
                 self.protocol_needs_update.emit()
 
     @property
     def qad(self):
         if self._qad is None:
-            self._qad = self.quad_demod()
+            self._qad = self.data if self.qad_demod_file_loaded else self.quad_demod()
 
         return self._qad
 
@@ -211,14 +228,11 @@ class Signal(QObject):
 
     @property
     def real_plot_data(self):
-        try:
-            return self.data.real
-        except AttributeError:
-            return np.zeros(0, dtype=np.float32)
+        return self.data.real
 
     @property
     def wave_data(self):
-        return (self.data.view(np.float32) * 32767).astype(np.int16)
+        return bytearray(np.multiply(-1, (np.round(self.data.real * 127)).astype(np.int8)))
 
     @property
     def changed(self) -> bool:
@@ -240,12 +254,12 @@ class Signal(QObject):
             self.save_as(self.filename)
 
     def save_as(self, filename: str):
-        QApplication.instance().setOverrideCursor(Qt.WaitCursor)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         self.filename = filename
         FileOperator.save_signal(self)
         self.name = os.path.splitext(os.path.basename(filename))[0]
         self.changed = False
-        QApplication.instance().restoreOverrideCursor()
+        QApplication.restoreOverrideCursor()
 
     def get_signal_start(self) -> int:
         """
@@ -258,31 +272,16 @@ class Signal(QObject):
         return signal_functions.find_signal_end(self.qad, self.modulation_type)
 
     def quad_demod(self):
-<        return signal_functions.afp_demod(self.data, self.noise_threshold, self.modulation_type)
+        return signal_functions.afp_demod(self.data, self.noise_treshold, self.modulation_type)
 
-    def calc_noise_threshold(self, noise_start: int, noise_end: int):
-        num_digits = 4
-        noise_start, noise_end = int(noise_start), int(noise_end)
-
-        if noise_start > noise_end:
-            noise_start, noise_end = noise_end, noise_start
-
-        try:
-            magnitudes = np.absolute(self.data[noise_start:noise_end])
-            maximum = np.max(magnitudes)
-            return np.ceil(maximum * 10 ** num_digits) / 10 ** num_digits
-        except ValueError:
-            logger.warning("Could not calculate noise threshold for range {}-{}".format(noise_start, noise_end))
-            return self.noise_threshold
->>>>>>>+HEAD
-======
-         return signal_functions.afp_demod(self.data, self.noise_treshold, self.modulation_type)
-
-    def calc_noise_treshold(self, noise_start, noise_end):
+    def calc_noise_treshold(self, noise_start: int, noise_end: int):
         NDIGITS = 4
-        self.noise_treshold = np.ceil(
-            np.max(np.absolute(self.data[noise_start:noise_end])) * 10 ** NDIGITS) / 10 ** NDIGITS
->>>>>>>-b1ae517
+        try:
+            self.noise_treshold = np.ceil(
+                np.max(np.absolute(self.data[int(noise_start):int(noise_end)])) * 10 ** NDIGITS) / 10 ** NDIGITS
+        except ValueError:
+            logger.warning("Could not caluclate noise treshold for range {}-{}".format(int(noise_start),int(noise_end)))
+
     def estimate_bitlen(self) -> int:
         bit_len = self.__parameter_cache[self.modulation_type_str]["bit_len"]
         if bit_len is None:
@@ -293,31 +292,13 @@ class Signal(QObject):
     def estimate_qad_center(self) -> float:
         center = self.__parameter_cache[self.modulation_type_str]["qad_center"]
         if center is None:
-<            noise_value = signal_functions.get_noise_for_mod_type(int(self.modulation_type))
->>>>>>>+HEAD
-======
-             noise_value = signal_functions.get_noise_for_mod_type(self.modulation_type)
->>>>>>>-b1ae517
-           qad = self.qad[np.where(self.qad > noise_value)] if noise_value < 0 else self.qad
+            noise_value = signal_functions.get_noise_for_mod_type(self.modulation_type)
+            qad = self.qad[np.where(self.qad > noise_value)] if noise_value < 0 else self.qad
             center = signal_functions.estimate_qad_center(qad, constants.NUM_CENTERS)
             self.__parameter_cache[self.modulation_type_str]["qad_center"] = center
         return center
 
-<    def create_new(self, start=0, end=0, new_data=None):
-        new_signal = Signal("", "New " + self.name)
-
-        if new_data is None:
-            new_signal._fulldata = self.data[start:end]
-        else:
-            new_signal._fulldata = new_data
-
-        new_signal._noise_threshold = self.noise_threshold
-        new_signal.noise_min_plot = self.noise_min_plot
-        new_signal.noise_max_plot = self.noise_max_plot
-        new_signal.__bit_len = self.bit_len
->>>>>>>+HEAD
-======
-     def create_new(self, start:int, end:int):
+    def create_new(self, start:int, end:int):
         new_signal = Signal("", "New " + self.name)
         new_signal._fulldata = self.data[start:end]
         new_signal._num_samples = end - start
@@ -327,8 +308,7 @@ class Signal(QObject):
         new_signal.__bit_len = self.bit_len
         new_signal.history = [("Crop", 0, len(self._fulldata))]
         new_signal.cur_history_index = 0
->>>>>>>-b1ae517
-       new_signal.__qad_center = self.qad_center
+        new_signal.__qad_center = self.qad_center
         new_signal.changed = True
         return new_signal
 
@@ -356,88 +336,6 @@ class Signal(QObject):
 
     def estimate_frequency(self, start: int, end: int, sample_rate: float):
         """
-<        Estimate the frequency of the baseband signal using FFT
-
-        :param start: Start of the area that shall be investigated
-        :param end: End of the area that shall be investigated
-        :param sample_rate: Sample rate of the signal
-        :return:
-        """
-        # ensure power of 2 for faster fft
-        length = 2 ** int(math.log2(end-start))
-        data = self.data[start:start+length]
-
-        try:
-            w = np.fft.fft(data)
-            frequencies = np.fft.fftfreq(len(w))
-            idx = np.argmax(np.abs(w))
-            freq = frequencies[idx]
-            freq_in_hertz = abs(freq * sample_rate)
-        except ValueError:
-            # No samples in window e.g. start == end, use a fallback
-            freq_in_hertz = 100e3
-
-        return freq_in_hertz
-
-    def eliminate(self):
-        self._fulldata = None
-        self._qad = None
-        self.parameter_cache.clear()
-
-    def silent_set_modulation_type(self, mod_type: int):
-        self.__modulation_type = mod_type
-
-    def insert_data(self, index: int, data: np.ndarray):
-        self._fulldata = np.insert(self._fulldata, index, data)
-        self._qad = None
-
-        self.__invalidate_after_edit()
-
-    def delete_range(self, start: int, end: int):
-        mask = np.ones(self.num_samples, dtype=bool)
-        mask[start:end] = False
-
-        try:
-            self._fulldata = self._fulldata[mask]
-            self._qad = self._qad[mask] if self._qad is not None else None
-        except IndexError as e:
-            logger.warning("Could not delete data: " + str(e))
-
-        self.__invalidate_after_edit()
-
-    def mute_range(self, start: int, end: int):
-        self._fulldata[start:end] = 0
-        if self._qad is not None:
-            self._qad[start:end] = 0
-
-        self.__invalidate_after_edit()
-
-    def crop_to_range(self, start: int, end: int):
-        self._fulldata = self._fulldata[start:end]
-        self._qad = self._qad[start:end] if self._qad is not None else None
-
-        self.__invalidate_after_edit()
-
-    def filter_range(self, start: int, end: int, fir_filter: Filter):
-        self._fulldata[start:end] = fir_filter.apply_fir_filter(self._fulldata[start:end])
-        self._qad[start:end] = signal_functions.afp_demod(self.data[start:end],
-                                                          self.noise_threshold, self.modulation_type)
-        self.__invalidate_after_edit()
-
-    def __invalidate_after_edit(self):
-        self.clear_parameter_cache()
-        self.changed = True
-        self.data_edited.emit()
-        self.protocol_needs_update.emit()
-
-    @staticmethod
-    def from_samples(samples: np.ndarray, name: str, sample_rate: float):
-        signal = Signal("", name, sample_rate=sample_rate)
-        signal._fulldata = samples
-
-        return signal
->>>>>>>+HEAD
-======
         Schätzt die Frequenz des Basissignals mittels FFT
 
         :param start: Start des Bereichs aus dem untersucht werden soll
@@ -460,4 +358,3 @@ class Signal(QObject):
 
     def silent_set_modulation_type(self, mod_type: int):
         self.__modulation_type = mod_type
->>>>>>> b1ae517... Inital Commit

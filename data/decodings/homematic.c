@@ -21,24 +21,21 @@ void print_binary(byte inpt)
 
 int main(int argc, char **argv)
 {
-    int i, max, offset;
+    int i, max;
     byte dec[256]={0}, enc[256]={0};
     char string[2048]={0};
-    
-    offset = 8; // Preamble + Sync
     
     if (argc>2)
     {
         if (argv[1][0]=='d')
         {
-            if (strlen(argv[2]) > 256*8 || strlen(argv[2]) < 4) return -1;
+            if (strlen(argv[2]) > 256*8 ) return -1;
             memcpy(string, argv[2], strlen(argv[2]));
             
-            for (i = 0; i < strlen(string)-3; i+=8)
-                enc[i/8] = str2byte(&string[i]);                
+            for (i = 0; i < strlen(string); i+=8)
+                enc[i/8] = str2byte(&string[i]);
             max = i/8;
-            memcpy(&dec, &enc, 256);
-
+            
             /*
              * byte[] Dec = new byte[Enc.Length];
              * Dec[0] = Enc[0]; //Packet length
@@ -49,28 +46,24 @@ int main(int argc, char **argv)
              * Dec[j] = (byte)(Enc[j] ^ Dec[2]);
              */
             
-            dec[offset+0] = enc[offset+0];
+            dec[0] = enc[0];
             
-            dec[offset+1] = (~enc[offset+1])^0x89;
-            for(i = offset + 2; i < max - 3; i++)
+            dec[1] = (~enc[1])^0x89;
+            for(i = 2; i < max; i++)
                 dec[i] = (enc[i-1]+0xdc) ^ enc[i];
-            dec[i] = enc[i] ^ dec[offset+2];
-            
-            dec[max-1]=0; // Set CRC to 0x0000
-            dec[max-2]=0;
+            dec[i] = enc[i] ^ dec[2];
             
             for(i = 0; i < max; i++)
                 print_binary(dec[i]);
         }
         else
         {
-            if (strlen(argv[2]) > 256*8 || strlen(argv[2]) < 4) return -1;
+            if (strlen(argv[2]) > 256*8 ) return -1;
             memcpy(string, argv[2], strlen(argv[2]));
             
-            for (i = 0; i < strlen(string)-3; i+=8)
+            for (i = 0; i < strlen(string); i+=8)
                 dec[i/8] = str2byte(&string[i]);
             max = i/8;
-            memcpy(&enc, &dec, 256);
             
             /*
              * byte[] Dec = new byte[Enc.Length];
@@ -82,15 +75,12 @@ int main(int argc, char **argv)
              * Dec[j] = (byte)(Enc[j] ^ Dec[2]);
              */
             
-            enc[offset+0] = dec[offset+0];
+            enc[0] = dec[0];
             
-            enc[offset+1] = ~(dec[offset+1]^0x89);
-            for(i = offset + 2; i < max - 3; i++)
+            enc[1] = ~(dec[1]^0x89);
+            for(i = 2; i < max; i++)
                 enc[i] = (enc[i-1]+0xdc) ^ dec[i];
-            enc[i] = dec[i] ^ dec[offset+2];
-            
-            enc[max-1]=0; // Set CRC to 0x0000
-            enc[max-2]=0;
+            enc[i] = dec[i] ^ dec[2];
             
             for(i = 0; i < max; i++)
                 print_binary(enc[i]);    

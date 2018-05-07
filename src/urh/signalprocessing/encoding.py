@@ -208,10 +208,7 @@ class encoding(object):
                 self.dst = self.chain[i + 1][1]
             elif self.code_externalprogram == operation:
                 if self.chain[i + 1] != "":
-                    try:
-                        self.external_decoder, self.external_encoder = self.chain[i + 1].split(";")
-                    except ValueError:
-                        pass
+                    self.external_decoder, self.external_encoder = self.chain[i + 1].split(";")
                 else:
                     self.external_decoder, self.external_encoder = "", ""
             elif self.code_data_whitening == operation:
@@ -625,6 +622,9 @@ class encoding(object):
         bitstring = bin(int(inpt, base=16))[2:]
         return "0" * (4 * len(inpt.lstrip('0x')) - len(bitstring)) + bitstring
 
+
+    def __eq__(self, other):
+        return self.get_chain() == other.get_chain()
 
 if __name__ == "__main__":
     e = encoding()

@@ -152,13 +152,6 @@ cpdef unsigned long long find_signal_start(float[::1] demod_samples, int mod_typ
     if ns < 100:
         l = ns
 
-    cdef float dsample = 0
-    cdef int has_oversteuern = 0
-    cdef int conseq_noise = 0
-    cdef int conseq_not_noise = 0
-    cdef int behind_oversteuern = 0
-    cdef float NOISE = get_noise_for_mod_type(mod_type)
-
     for i in range(0, l):
         dsample = demod_samples[i]
         if dsample > NOISE:
@@ -189,8 +182,8 @@ cpdef unsigned long long find_signal_start(float[::1] demod_samples, int mod_typ
 
 cpdef unsigned long long find_signal_end(float[::1] demod_samples, int mod_type):
 
-    cdef unsigned long long i = 0
-    cdef float dsample = 0
+    cdef unsigned long long i
+    cdef float dsample
     cdef int conseq_not_noise = 0
     cdef float NOISE = get_noise_for_mod_type(mod_type)
     cdef unsigned long long ns = len(demod_samples)
@@ -337,8 +330,8 @@ cpdef unsigned long long estimate_bit_len(float[::1] qad_samples, float qad_cent
     return 100
 
 cpdef int find_nearest_center(float sample, float[::1] centers, int num_centers) nogil:
-    cdef int i = 0
-    cdef float center = 0
+    cdef int i
+    cdef float center
     cdef int result = 0
     cdef float min_diff = 99999
     cdef float cur_diff = 0
@@ -369,7 +362,7 @@ cpdef float estimate_qad_center(float[::1] samples, int num_centers):
 
     cdef Cluster *clusters = <Cluster *>malloc(num_centers * sizeof(Cluster))
 
-    cdef unsigned long long i = 0
+    cdef unsigned long long i
 
     for i in range(0, num_centers):
         clusters[i].nitems = 0

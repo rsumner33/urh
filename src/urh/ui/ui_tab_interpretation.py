@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file '../ui/tab_interpretation.ui'
 #
-# Created by: PyQt5 UI code generator 5.5.1
+# Created by: PyQt5 UI code generator 5.6
 #
 # WARNING! All changes made in this file will be lost!
 
@@ -35,34 +34,6 @@ class Ui_Interpretation(object):
         self.scrlAreaSignals.setAutoFillBackground(True)
         self.scrlAreaSignals.setStyleSheet("")
         self.scrlAreaSignals.setObjectName("scrlAreaSignals")
-        self.verticalLayout = QtWidgets.QVBoxLayout(self.scrlAreaSignals)
-        self.verticalLayout.setContentsMargins(0, 0, 0, 0)
-        self.verticalLayout.setObjectName("verticalLayout")
-        self.splitter = QtWidgets.QSplitter(self.scrlAreaSignals)
-        self.splitter.setStyleSheet("QSplitter::handle:vertical {\n"
-"margin: 4px 0px;\n"
-"    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, \n"
-"stop:0 rgba(255, 255, 255, 0), \n"
-"stop:0.5 rgba(100, 100, 100, 100), \n"
-"stop:1 rgba(255, 255, 255, 0));\n"
-"    image: url(:/icons/data/icons/splitter_handle_horizontal.svg);\n"
-"}")
-        self.splitter.setOrientation(QtCore.Qt.Vertical)
-        self.splitter.setHandleWidth(6)
-        self.splitter.setObjectName("splitter")
-        self.labelGettingStarted = QtWidgets.QLabel(self.splitter)
-        font = QtGui.QFont()
-        font.setPointSize(32)
-        self.labelGettingStarted.setFont(font)
-        self.labelGettingStarted.setStyleSheet("")
-        self.labelGettingStarted.setAlignment(QtCore.Qt.AlignCenter)
-        self.labelGettingStarted.setWordWrap(True)
-        self.labelGettingStarted.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
-        self.labelGettingStarted.setObjectName("labelGettingStarted")
-        self.placeholderLabel = QtWidgets.QLabel(self.splitter)
-        self.placeholderLabel.setText("")
-        self.placeholderLabel.setObjectName("placeholderLabel")
-        self.verticalLayout.addWidget(self.splitter)
         self.scrollArea.setWidget(self.scrlAreaSignals)
         self.verticalLayout.addWidget(self.scrollArea)
         self.horizontalLayout = QtWidgets.QHBoxLayout()
@@ -91,4 +62,3 @@ class Ui_Interpretation(object):
         self.lShiftStatus.setText(_translate("Interpretation", "Statusinformationen like a Bozz"))
 
 from urh.ui.ScrollArea import ScrollArea
-from . import urh_rc

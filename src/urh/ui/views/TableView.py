@@ -1,3 +1,4 @@
+import numpy as np
 from PyQt5.QtCore import Qt, QItemSelectionModel, QItemSelection
 from PyQt5.QtGui import QKeySequence, QKeyEvent
 from PyQt5.QtWidgets import QTableView, QApplication
@@ -8,16 +9,6 @@ class TableView(QTableView):
     def __init__(self, parent=None):
 
         super().__init__(parent)
-
-    def _add_insert_column_menu(self, menu):
-        column_menu = menu.addMenu("Insert column")
-
-        insert_column_left_action = column_menu.addAction("on the left")
-        insert_column_left_action.triggered.connect(self.on_insert_column_left_action_triggered)
-        insert_column_left_action.setIcon(QIcon.fromTheme("edit-table-insert-column-left"))
-        insert_column_right_action = column_menu.addAction("on the right")
-        insert_column_right_action.setIcon(QIcon.fromTheme("edit-table-insert-column-right"))
-        insert_column_right_action.triggered.connect(self.on_insert_column_right_action_triggered)
 
     def selectionModel(self) -> QItemSelectionModel:
         return super().selectionModel()
@@ -46,7 +37,7 @@ class TableView(QTableView):
         sel.select(startindex, endindex)
         self.selectionModel().select(sel, QItemSelectionModel.Select)
 
-    def resize_it(self):
+    def resize_columns(self):
         if not self.isVisible():
             return
 
@@ -60,6 +51,19 @@ class TableView(QTableView):
             self.setColumnWidth(i, w * len(str(i + 1)))
             if i % 10 == 0:
                 QApplication.processEvents()
+
+    def resize_vertical_header(self):
+        nrows = self.model().rowCount()
+        if self.isVisible() and nrows > 0:
+            hd = self.model().headerData
+            max_len = np.max([len(str(hd(i, Qt.Vertical, Qt.DisplayRole))) for i in range(nrows)])
+            w = (self.font().pointSize() + 2) * max_len
+            rh = self.rowHeight(0)
+            for i in range(nrows):
+                self.verticalHeader().resizeSection(i, w)
+                self.setRowHeight(i, rh)
+                if i % 10 == 0:
+                    QApplication.processEvents()
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Delete:

@@ -1,19 +1,22 @@
 import copy
 import math
-import random
+import xml.etree.ElementTree as ET
 from collections import defaultdict
 
 import numpy as np
-from PyQt5.QtCore import pyqtSlot, QObject, pyqtSignal, Qt
+from PyQt5.QtCore import QObject, pyqtSignal, Qt
 
 from urh import constants
 from urh.cythonext import signalFunctions
 from urh.cythonext.signalFunctions import Symbol
+
+from urh.signalprocessing.LabelSet import LabelSet
 from urh.signalprocessing.ProtocoLabel import ProtocolLabel
 from urh.signalprocessing.ProtocolBlock import ProtocolBlock
 from urh.signalprocessing.Signal import Signal
 from urh.signalprocessing.encoding import encoding
 from urh.util import FileOperator
+from urh.util.Formatter import Formatter
 
 
 class color:
@@ -44,19 +47,10 @@ class ProtocolAnalyzer(object):
     """
     The ProtocolAnalyzer is what you would refer to as "protocol".
     The data is stored in the blocks variable.
-    This class offers serveral methods for protocol analysis.
+    This class offers several methods for protocol analysis.
     """
 
     def __init__(self, signal: Signal):
-        # Erster Index gibt die Blocknummer an.
-        # Letzter Index einer Zeile gibt Ende der Pause an.
-        # Letztes Bit steht also an vorletzter Stelle
-        self.bit_sample_pos = []
-        """:type: list of [list of int]"""
-
-        self._protocol_labels = []
-        """:type: list of ProtocolLabel """
-
         self.bit_alignment_positions = []
         """:param bit_alignment_positions:
         Um die Hex ASCII Darstellungen an beliebigen stellen auszurichten """
@@ -77,6 +71,26 @@ class ProtocolAnalyzer(object):
 
         self.decoder = encoding(["Non Return To Zero (NRZ)"]) # For Default Encoding of Protocol
         # Blocks
+
+        self.labelsets = [LabelSet("default")]
+
+    @property
+    def default_labelset(self):
+        if len(self.labelsets) == 0:
+            self.labelsets.append(LabelSet("default"))
+
+        return self.labelsets[0]
+
+    @default_labelset.setter
+    def default_labelset(self, val: LabelSet):
+        if len(self.labelsets) > 0:
+            self.labelsets[0] = val
+        else:
+            self.labelsets.append(val)
+
+    @property
+    def protocol_labels(self):
+        return [lbl for labelset in self.labelsets for lbl in labelset]
 
     def __deepcopy__(self, memo):
         cls = self.__class__
@@ -104,20 +118,6 @@ class ProtocolAnalyzer(object):
     @property
     def pauses(self):
         return [block.pause for block in self.blocks]
-
-    @property
-    def protocol_labels(self):
-        return self._protocol_labels
-
-    @protocol_labels.setter
-    def protocol_labels(self, value):
-        """
-
-        :type value: list of ProtocolLabel
-        """
-        self._protocol_labels = value
-        if self._protocol_labels:
-            self._protocol_labels.sort()
 
     @property
     def plain_bits_str(self):
@@ -185,6 +185,35 @@ class ProtocolAnalyzer(object):
                                               sample_rate=srate
                                               ) for block in self.blocks)
 
+
+    def plain_to_html(self, view, show_pauses=True) -> str:
+        time = constants.SETTINGS.value('show_pause_as_time', type=bool)
+        if show_pauses and time and self.signal:
+            srate = self.signal.sample_rate
+        else:
+            srate = None
+
+        result = []
+        for block in self.blocks:
+            cur_str = ""
+            if block.participant:
+                color = constants.PARTICIPANT_COLORS[block.participant.color_index]
+                red, green, blue  = color.red(), color.green(), color.blue()
+                fgcolor = "#000000" if (red * 0.299 + green * 0.587 + blue * 0.114) > 186 else "#ffffff"
+                cur_str += '<span style="background-color: rgb({0},{1},{2}); color: {3}">'.format(red, green, blue, fgcolor)
+
+                #cur_str += '<span style="color: rgb({0},{1},{2})">'.format(red, green, blue)
+
+            cur_str += block.view_to_string(view=view, decoded=False, show_pauses=False, sample_rate=srate)
+
+            if block.participant:
+                cur_str += '</span>'
+
+            cur_str += block.get_pause_str(sample_rate=srate)
+            result.append(cur_str)
+
+        return "<br>".join(result)
+
     def set_decoder_for_blocks(self, decoder: encoding, blocks=None):
         blocks = blocks if blocks is not None else self.blocks
         self.decoder = decoder
@@ -196,8 +225,6 @@ class ProtocolAnalyzer(object):
         if signal is None:
             self.blocks = None
             return
-
-        self.bit_sample_pos[:] = []
 
         if self.blocks is not None:
             self.blocks[:] = []
@@ -214,16 +241,16 @@ class ProtocolAnalyzer(object):
                                                 signal.tolerance,
                                                 signal.modulation_type)
 
-        bit_data, pauses = self._ppseq_to_bits(ppseq, bit_len, rel_symbol_len)
+        bit_data, pauses, bit_sample_pos = self._ppseq_to_bits(ppseq, bit_len, rel_symbol_len)
 
 
         i = 0
         for bits, pause in zip(bit_data, pauses):
-            middle_bit_pos = self.bit_sample_pos[i][int(len(bits) / 2)]
+            middle_bit_pos = bit_sample_pos[i][int(len(bits) / 2)]
             start, end = middle_bit_pos, middle_bit_pos + bit_len
             rssi = np.mean(np.abs(signal._fulldata[start:end]))
-            block = ProtocolBlock(bits, pause, self.bit_alignment_positions,
-                                  bit_len=bit_len, rssi=rssi, decoder=self.decoder)
+            block = ProtocolBlock(bits, pause, self.bit_alignment_positions, labelset=self.default_labelset,
+                                  bit_len=bit_len, rssi=rssi, decoder=self.decoder, bit_sample_pos=bit_sample_pos[i])
             self.blocks.append(block)
             i += 1
 
@@ -237,12 +264,13 @@ class ProtocolAnalyzer(object):
             rel_symbol_len = 0.1
         return rel_symbol_len
 
-    def _ppseq_to_bits(self, ppseq, bit_len: int, rel_symbol_len: float):
+    def _ppseq_to_bits(self, ppseq, bit_len: int, rel_symbol_len: float, write_bit_sample_pos=True):
         self.used_symbols.clear()
-        self.bit_sample_pos[:] = []
+        bit_sampl_pos = []
+        bit_sample_positions = []
+
         data_bits = []
         resulting_data_bits = []
-        bit_sampl_pos = []
         pauses = []
         start = 0
         total_samples = 0
@@ -282,55 +310,59 @@ class ProtocolAnalyzer(object):
                                                   avail_symbol_names)
 
                 data_bits.append(symbol)
-                bit_sampl_pos.append(total_samples)
+                if write_bit_sample_pos:
+                    bit_sampl_pos.append(total_samples)
+
                 total_samples += num_samples
                 continue
 
             if cur_pulse_type == pause_type:
                 # OOK abdecken
                 if num_bits < 9:
-                    for k in range(num_bits):
-                        data_bits.append(False)
-                        bit_sampl_pos.append(total_samples + k * bit_len)
+                    data_bits.extend([False] * num_bits)
+                    if write_bit_sample_pos:
+                        bit_sampl_pos.extend([total_samples + k * bit_len for k in range(num_bits)])
 
                 elif not there_was_data:
                     # Ignore this pause, if there were no informations
                     # transmittted previously
-                    del data_bits[:]
-                    del bit_sampl_pos[:]
+                    data_bits[:] = []
+                    bit_sampl_pos[:] = []
 
                 else:
-                    bit_sampl_pos.append(total_samples)
-                    bit_sampl_pos.append(total_samples + num_samples)
-                    self.bit_sample_pos.append(bit_sampl_pos[:])
-                    del bit_sampl_pos[:]
+                    if write_bit_sample_pos:
+                        bit_sampl_pos.append(total_samples)
+                        bit_sampl_pos.append(total_samples + num_samples)
+                        bit_sample_positions.append(bit_sampl_pos[:])
+                        bit_sampl_pos[:] = []
 
                     resulting_data_bits.append(data_bits[:])
-                    del data_bits[:]
+                    data_bits[:] = []
                     pauses.append(num_samples)
                     there_was_data = False
 
             elif cur_pulse_type == zero_pulse_type:
-                for k in range(num_bits):
-                    data_bits.append(False)
-                    bit_sampl_pos.append(total_samples + k * bit_len)
+                data_bits.extend([False] * num_bits)
+                if write_bit_sample_pos:
+                    bit_sampl_pos.extend([total_samples + k * bit_len for k in range(num_bits)])
 
             elif cur_pulse_type == one_pulse_type:
                 if not there_was_data:
                     there_was_data = num_bits > 0
-                for k in range(num_bits):
-                    data_bits.append(True)
-                    bit_sampl_pos.append(total_samples + k * bit_len)
+                data_bits.extend([True] * num_bits)
+                if write_bit_sample_pos:
+                    bit_sampl_pos.extend([total_samples + k * bit_len for k in range(num_bits)])
 
             total_samples += num_samples
 
         if there_was_data:
             resulting_data_bits.append(data_bits[:])
-            self.bit_sample_pos.append(bit_sampl_pos[:] + [total_samples])
+            if write_bit_sample_pos:
+                bit_sample_positions.append(bit_sampl_pos[:] + [total_samples])
             pause = ppseq[-1, 1] if ppseq[-1, 0] == pause_type else 0
             pauses.append(pause)
 
-        return resulting_data_bits, pauses
+        return resulting_data_bits, pauses, bit_sample_positions
 
     def __find_matching_symbol(self, num_bits: int, pulsetype: int):
         for s in self.used_symbols:
@@ -368,12 +400,10 @@ class ProtocolAnalyzer(object):
                                 endblock: int, endindex: int,
                                 include_pause: bool):
         """
-        Bestimmt an welcher Stelle (Samplemäßig) sich eine Bitsequenz befindet, die durch
-        start und ende des Bitstrings gegeben ist
-
+        Determine on which place (regarding samples) a bit sequence is
         :rtype: tuple[int,int]
         """
-        lookup = self.bit_sample_pos
+        lookup = {i: block.bit_sample_pos for i, block in enumerate(self.blocks)}
 
         if startblock > endblock:
             startblock, endblock = endblock, startblock
@@ -406,11 +436,12 @@ class ProtocolAnalyzer(object):
         start_index = -1
         end_block = -1
         end_index = -1
+        lookup =  [block.bit_sample_pos for block in self.blocks]
 
-        if selection_start + selection_width < self.bit_sample_pos[0][0] or selection_width < bitlen:
+        if selection_start + selection_width < lookup[0][0] or selection_width < bitlen:
             return start_block, start_index, end_block, end_index
 
-        for j, block_sample_pos in enumerate(self.bit_sample_pos):
+        for j, block_sample_pos in enumerate(lookup):
             if block_sample_pos[-2] < selection_start:
                 continue
             elif start_block == -1:
@@ -435,8 +466,8 @@ class ProtocolAnalyzer(object):
                         end_index = i
                         return start_block, start_index, end_block, end_index
 
-        last_block = len(self.bit_sample_pos) - 1
-        last_index = len(self.bit_sample_pos[last_block]) - 1
+        last_block = len(lookup) - 1
+        last_index = len(lookup[last_block]) - 1
         return start_block, start_index, last_block, last_index
 
     def delete_blocks(self, block_start: int, block_end: int, start: int, end: int, view: int, decoded: bool,
@@ -452,17 +483,6 @@ class ProtocolAnalyzer(object):
                     removable_block_indices.append(i)
             except IndexError:
                 continue
-
-        # Refblocks der Labels updaten
-        for i in removable_block_indices:
-            labels_before = [p for p in self.protocol_labels
-                             if p.refblock < i < p.refblock + p.nfuzzed]
-            labels_after = [p for p in self.protocol_labels if p.refblock > i]
-            for label in labels_after:
-                label.refblock -= 1
-
-            for label in labels_before:
-                label.nfuzzed -= 1
 
         # Remove Empty Blocks and Pause after empty Blocks
         for i in reversed(removable_block_indices):
@@ -496,11 +516,11 @@ class ProtocolAnalyzer(object):
     def copy_data(self):
         """
 
-        :rtype: list of ProtocolBlock, list of ProtocolLabel
+        :rtype: list of ProtocolBlock, list of LabelSet
         """
-        return copy.deepcopy(self.blocks), copy.deepcopy(self.protocol_labels)
+        return copy.deepcopy(self.blocks), copy.deepcopy(self.labelsets)
 
-    def revert_to(self, orig_blocks, orig_labels):
+    def revert_to(self, orig_blocks, orig_labelsets):
         """
         Revert to previous state
 
@@ -511,7 +531,7 @@ class ProtocolAnalyzer(object):
         """
         self.blocks = orig_blocks
         """:type: list of ProtocolBlock """
-        self.protocol_labels = orig_labels
+        self.labelsets = orig_labelsets
 
     def find_differences(self, refindex: int, view: int):
         """
@@ -575,8 +595,12 @@ class ProtocolAnalyzer(object):
 
     def destroy(self):
         self.bit_alignment_positions = None
-        self.protocol_labels = None
-        self.bit_sample_pos = None
+        try:
+            for labelset in self.labelsets:
+                labelset.clear()
+        except TypeError:
+            pass # No labelsets defined
+        self.labelsets = []
         self.blocks = None
 
     def estimate_frequency_for_one(self, sample_rate: float, nbits=42) -> float:
@@ -622,3 +646,52 @@ class ProtocolAnalyzer(object):
 
     def set_labels(self, val):
         self._protocol_labels = val
+
+    def add_new_labelset(self, labels):
+        names = set(labelset.name for labelset in self.labelsets)
+        name = "Labelset #"
+        i = 0
+        while True:
+            i += 1
+            if name + str(i) not in names:
+                self.labelsets.append(LabelSet(name=name+str(i), iterable=[copy.deepcopy(lbl) for lbl in labels]))
+                break
+
+
+    def to_xml(self, decoders) -> ET.Element:
+        root = ET.Element("protocol")
+
+        # Save symbols
+        if len(self.used_symbols) > 0:
+            symbols_tag = ET.SubElement(root, "symbols")
+            for symbol in self.used_symbols:
+                ET.SubElement(symbols_tag, "symbol",
+                              attrib={"name": symbol.name, "pulsetype": str(symbol.pulsetype),
+                                      "nbits": str(symbol.nbits), "nsamples": str(symbol.nsamples)})
+        # Save data
+        data_tag = ET.SubElement(root, "blocks")
+        for i, block in enumerate(self.blocks):
+            data_tag.append(block.to_xml(decoders=decoders, include_labelset=False))
+
+        # Save labelsets separatively as not saved in blocks already
+        labelsets_tag = ET.SubElement(root, "labelsets")
+        for labelset in self.labelsets:
+            labelsets_tag.append(labelset.to_xml())
+
+        return root
+
+    def from_xml(self, protocol_tag: ET.Element, participants, decoders):
+        if protocol_tag:
+            self.used_symbols.clear()
+            symbols_tag = protocol_tag.find("symbols")
+            if symbols_tag:
+                for symbol_tag in symbols_tag.findall("symbol"):
+                    s = Symbol(symbol_tag.get("name"), int(symbol_tag.get("nbits")),
+                               int(symbol_tag.get("pulsetype")), int(symbol_tag.get("nsamples")))
+                    self.used_symbols.add(s)
+
+            block_tags = protocol_tag.find("blocks").findall("block")
+
+            for i, block_tag in enumerate(block_tags):
+                self.blocks[i].from_xml(tag=block_tag, participants=participants, decoders=decoders, labelsets=self.labelsets)
+                self.blocks[i].pause = Formatter.str2val(block_tag.get("pause"), int)

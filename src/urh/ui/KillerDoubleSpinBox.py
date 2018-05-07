@@ -1,9 +1,6 @@
-from PyQt5.QtCore import QLocale
 from PyQt5.QtCore import QRegExp
 from PyQt5.QtGui import QValidator
-from PyQt5.QtWidgets import QApplication
 from PyQt5.QtWidgets import QDoubleSpinBox
-
 
 class KillerDoubleSpinBox(QDoubleSpinBox):
     """
@@ -12,22 +9,48 @@ class KillerDoubleSpinBox(QDoubleSpinBox):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.auto_update_step_size = True
-
         self.lineEdit().setValidator(None)
-
-        # Cant connect to value changed, as it would delete the number when changing a digit
-        # see: https://github.com/jopohl/urh/issues/129
+        self.lineEdit().textChanged.connect(self.on_text_changed)
+        self.editingFinished.connect(self.on_text_edited)
         self.editingFinished.connect(self.adjust_step)
+        self.valueChanged.connect(self.setUnit)
+        self.auto_suffix = True
 
-    def setValue(self, value: float):
-        super().setValue(value)
+    def on_text_changed(self):
+        text = self.lineEdit().text().upper()
+        if text.endswith("G") or text.endswith("M") or text.endswith("K"):
+            if self.suffix() != text[-1]:
+                if self.auto_suffix:
+                    self.setSuffix(text[-1])
+        else:
+            if self.suffix() != "":
+                if self.auto_suffix:
+                    self.setSuffix("")
+
+    def on_text_edited(self):
+        self.lineEdit().setText(self.lineEdit().text().upper())
+
+    def setValue(self, val: float):
+        super().setValue(val)
         self.adjust_step()
 
-    def adjust_step(self):
-        if not self.auto_update_step_size:
-            return
 
+    def setUnit(self):
+        value = abs(self.value())
+        if 10 ** 9 <= value <= 10 ** 11:
+            if self.suffix() != "G" and self.auto_suffix:
+                self.setSuffix("G")
+        elif 10 ** 6 <= value < 10 ** 9:
+            if self.suffix() != "M" and self.auto_suffix:
+                self.setSuffix("M")
+        elif 10 ** 3 <= value < 10 ** 6:
+            if self.suffix() != "K" and self.auto_suffix:
+                self.setSuffix("K")
+        else:
+            if self.suffix() != "" and self.auto_suffix:
+                self.setSuffix("")
+
+    def adjust_step(self):
         value = abs(self.value())
         if value >= 1e9:
             self.setSingleStep(10 ** (9 - self.decimals()))
@@ -40,25 +63,25 @@ class KillerDoubleSpinBox(QDoubleSpinBox):
 
     def textFromValue(self, value: float):
         if abs(value) >= 10 ** 9:
-            return super().textFromValue(value / 10 ** 9) + "G"
+            return super().textFromValue(value / 10 ** 9)
         elif abs(value) >= 10 ** 6:
-            return super().textFromValue(value / 10 ** 6) + "M"
+            return super().textFromValue(value / 10 ** 6)
         elif abs(value) >= 10 ** 3:
-            return super().textFromValue(value / 10 ** 3) + "K"
+            return super().textFromValue(value / 10 ** 3)
         else:
             return super().textFromValue(value)
 
     def valueFromText(self, text: str):
         if text.endswith("G") or text.endswith("g"):
-            return QLocale().toDouble(text[:-1])[0] * 10 ** 9
+            return super().valueFromText(text[:-1]) * 10 ** 9
         elif text.endswith("M") or text.endswith("m"):
-            return QLocale().toDouble(text[:-1])[0] * 10 ** 6
+            return super().valueFromText(text[:-1]) * 10 ** 6
         elif text.endswith("K") or text.endswith("k"):
-            return QLocale().toDouble(text[:-1])[0] * 10 ** 3
+            return super().valueFromText(text[:-1]) * 10 ** 3
         else:
-            return QLocale().toDouble(text)[0]
+            return super().valueFromText(text)
 
     def validate(self, inpt: str, pos: int):
-        rx = QRegExp("^(-?[0-9]+)[.]?[0-9]*[kKmMgG]?$")
+        rx = QRegExp("^(-?[0-9]+)[.]?[0-9]*[kKmMgG"+str(self.suffix())+"]?$")
         result = QValidator.Acceptable if rx.exactMatch(inpt.replace(",", ".")) else QValidator.Invalid
         return result, inpt, pos

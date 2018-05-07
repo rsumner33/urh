@@ -6,19 +6,16 @@
 ##################################################
 
 from optparse import OptionParser
-import Initializer
-
-Initializer.init_path()
 
 from gnuradio import gr
 from gnuradio.eng_option import eng_option
 from grc_gnuradio import blks2 as grc_blks2
 from InputHandlerThread import InputHandlerThread
 import osmosdr
-from gnuradio import zeromq
+
 
 class top_block(gr.top_block):
-    def __init__(self, samp_rate, freq, gain, if_gain, baseband_gain, bw, port):
+    def __init__(self, samp_rate, freq, gain, bw, port):
         gr.top_block.__init__(self, "Top Block")
 
         ##################################################
@@ -40,17 +37,22 @@ class top_block(gr.top_block):
         self.osmosdr_source_0.set_iq_balance_mode(0, 0)
         self.osmosdr_source_0.set_gain_mode(False, 0)
         self.osmosdr_source_0.set_gain(gain, 0)
-        self.osmosdr_source_0.set_if_gain(if_gain, 0)
-        self.osmosdr_source_0.set_bb_gain(baseband_gain, 0)
+        self.osmosdr_source_0.set_if_gain(gain, 0)
+        self.osmosdr_source_0.set_bb_gain(gain, 0)
         self.osmosdr_source_0.set_antenna("", 0)
         self.osmosdr_source_0.set_bandwidth(bw, 0)
 
-        self.zeromq_push_sink_0 = zeromq.push_sink(gr.sizeof_gr_complex, 1, 'tcp://127.0.0.1:' + str(port))
+        self.blks2_tcp_sink_0 = grc_blks2.tcp_sink(
+            itemsize=gr.sizeof_gr_complex * 1,
+            addr="",  # Vorher 127.0.0.1
+            port=port,
+            server=True,
+        )
 
         ##################################################
         # Connections
         ##################################################
-        self.connect((self.osmosdr_source_0, 0), (self.zeromq_push_sink_0, 0))
+        self.connect((self.osmosdr_source_0, 0), (self.blks2_tcp_sink_0, 0))
 
     def get_samp_rate(self):
         return self.samp_rate
@@ -64,13 +66,9 @@ class top_block(gr.top_block):
 
     def set_gain(self, gain):
         self.gain = gain
-        self.osmosdr_sink_0.set_gain(self.gain, 0)
-
-    def set_if_gain(self, gain):
-        self.osmosdr_sink_0.set_if_gain(gain, 0)
-
-    def set_baseband_gain(self, gain):
-        self.osmosdr_sink_0.set_bb_gain(gain, 0)
+        self.osmosdr_source_0.set_gain(self.gain, 0)
+        self.osmosdr_source_0.set_if_gain(self.gain, 0)
+        self.osmosdr_source_0.set_bb_gain(self.gain, 0)
 
     def get_freq(self):
         return self.freq
@@ -92,14 +90,10 @@ if __name__ == '__main__':
     parser.add_option("-s", "--samplerate", dest="samplerate", help="Sample Rate", default=100000)
     parser.add_option("-f", "--freq", dest="freq", help="Frequency", default=433000)
     parser.add_option("-g", "--gain", dest="gain", help="Gain", default=30)
-    parser.add_option("-i", "--if-gain", dest="if_gain", help="IF Gain", default=30)
-    parser.add_option("-a", "--baseband-gain", dest="baseband_gain", help="Baseband Gain", default=30)
     parser.add_option("-b", "--bandwidth", dest="bw", help="Bandwidth", default=200000)
     parser.add_option("-p", "--port", dest="port", help="Port", default=1337)
-    parser.add_option("-r", "--gnuradio-dir", dest="gnuradio_dir", help="Install Directory for Gnuradio (Windows only)", default=None)
     (options, args) = parser.parse_args()
-    tb = top_block(float(options.samplerate), float(options.freq),
-                   int(options.gain), int(options.if_gain), int(options.baseband_gain),
+    tb = top_block(float(options.samplerate), float(options.freq), int(options.gain),
                    float(options.bw), int(options.port))
     iht = InputHandlerThread(tb)
     iht.start()

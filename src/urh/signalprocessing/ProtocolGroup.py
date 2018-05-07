@@ -1,15 +1,26 @@
-from urh.signalprocessing.Encoding import Encoding
+from urh.signalprocessing.encoding import encoding
 from urh.signalprocessing.ProtocolAnalyzer import ProtocolAnalyzer
-from urh.signalprocessing.Message import Message
+from urh.signalprocessing.ProtocolBlock import ProtocolBlock
 
 
 class ProtocolGroup(object):
-    __slots__ = ["name", "__items", "loaded_from_file"]
-
-    def __init__(self, name: str):
+    def __init__(self, name: str, decoding: encoding = encoding(["Non Return To Zero (NRZ)"])):
         self.name = name
+        self.__decoding = decoding
         self.__items = []
+
         self.loaded_from_file = False
+
+    @property
+    def decoding(self) -> encoding:
+        return self.__decoding
+
+    @decoding.setter
+    def decoding(self, val:encoding):
+        if self.decoding != val:
+            self.__decoding = val
+            for proto in self.protocols:
+                proto.set_decoder_for_blocks(self.decoding)
 
     @property
     def items(self):
@@ -24,8 +35,8 @@ class ProtocolGroup(object):
         return len(self.items)
 
     @property
-    def num_messages(self):
-        return sum(p.num_messages for p in self.protocols)
+    def num_blocks(self):
+        return sum(p.num_blocks for p in self.protocols)
 
     @property
     def all_protocols(self):
@@ -44,14 +55,14 @@ class ProtocolGroup(object):
         return [proto for proto in self.all_protocols if proto.show]
 
     @property
-    def messages(self):
+    def blocks(self):
         """
 
-        :rtype: list of Message
+        :rtype: list of ProtocolBlock
         """
         result = []
         for proto in self.protocols:
-            result.extend(proto.messages)
+            result.extend(proto.blocks)
         return result
 
     @property
@@ -84,16 +95,17 @@ class ProtocolGroup(object):
             return None
 
     def __repr__(self):
-        return "Group: {0}".format(self.name)
-   def add_protocol_item(self, protocol_item):
+        return "{0} ({1})".format(self.name, self.decoding.name)
+
+    def set_labels(self, val):
+        self.__labels = val # For AmbleAssignPlugin
+
+
+    def add_protocol_item(self, protocol_item):
         """
         This is intended for adding a protocol item directly to the group
 
         :type protocol: ProtocolTreeItem
         :return:
         """
-<<        self.__items.append(protocol_item) # Warning: parent is None!
->>>>>>>+HEAD
-=====
         self.__items.append(protocol_item) # Warning: parent is None!
->>>>>>> b1ae517... Inital Commit

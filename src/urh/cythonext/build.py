@@ -4,6 +4,7 @@ import sys
 import tempfile
 from subprocess import call
 
+sys.dont_write_bytecode = True
 build_dir = os.path.join(tempfile.gettempdir(), "build")
 
 def get_python3_interpreter():
@@ -17,7 +18,7 @@ def get_python3_interpreter():
 
     return None
 
-if __name__ == "__main__":
+def main():
     python3 = get_python3_interpreter()
 
     call([python3, "setup.py", "build_ext",
@@ -25,8 +26,6 @@ if __name__ == "__main__":
           os.path.join(build_dir, "result"),
           "--build-temp", build_dir])
 
-    build_path = os.path.join(build_dir, "result")
-    filenames = os.listdir(build_path)
 
-    for f in filenames:
-        shutil.move(os.path.join(build_path, f), f)
+if __name__ == "__main__":
+    main()

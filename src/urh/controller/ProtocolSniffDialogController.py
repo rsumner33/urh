@@ -1,10 +1,12 @@
 from PyQt5.QtCore import Qt, pyqtSlot, QRegExp, pyqtSignal
-from PyQt5.QtGui import QRegExpValidator, QCloseEvent
+from PyQt5.QtGui import QRegExpValidator, QCloseEvent, QIcon
 from PyQt5.QtWidgets import QDialog, QCompleter, QDirModel
+from urh.dev.BackendHandler import BackendHandler
 
 from urh import constants
 from urh.signalprocessing.ProtocolSniffer import ProtocolSniffer
 from urh.ui.ui_proto_sniff import Ui_SniffProtocol
+from urh.util.Errors import Errors
 
 
 class ProtocolSniffDialogController(QDialog):
@@ -28,26 +30,39 @@ class ProtocolSniffDialogController(QDialog):
         self.ui.spinboxErrorTolerance.setValue(tolerance)
         self.ui.comboxModulation.setCurrentIndex(modulation_type_index)
 
-        self.sniffer = ProtocolSniffer(bit_length, center, noise, tolerance,
-                                       modulation_type_index, samp_rate, freq,
-                                       gain, bw, device)
-
-        self.sniffer.usrp_ip = self.ui.lineEditIP.text()
-
         self.ui.btnStop.setEnabled(False)
         self.ui.btnClear.setEnabled(False)
 
         self.ui.cbDevice.clear()
         items = []
-        if constants.SETTINGS.value('usrp_available', type=bool):
-            items.append("USRP")
-        if constants.SETTINGS.value('hackrf_available', type=bool):
-            items.append("HackRF")
+        bh = BackendHandler()
+        for device_name in bh.DEVICE_NAMES:
+            dev = bh.device_backends[device_name.lower()]
+            if dev.is_enabled and dev.supports_rx:
+                items.append(device_name)
+
         self.ui.cbDevice.addItems(items)
+        del bh
         if device in items:
             self.ui.cbDevice.setCurrentIndex(items.index(device))
 
-        self.on_device_edited()
+        if self.ui.cbDevice.count() == 0:
+            Errors.no_device()
+            self.close()
+            return
+
+        device = self.ui.cbDevice.currentText()
+        self.sniffer = ProtocolSniffer(bit_length, center, noise, tolerance,
+                               modulation_type_index, samp_rate, freq,
+                               gain, bw, device)
+
+        self.ui.lineEditIP.setVisible(device == "USRP")
+        self.ui.labelIP.setVisible(device == "USRP")
+
+
+        self.sniffer.usrp_ip = self.ui.lineEditIP.text()
+        self.bw_sr_are_locked = self.ui.btnLockBWSR.isChecked()
+
 
         ipRange = "(?:[0-1]?[0-9]?[0-9]|2[0-4][0-9]|25[0-5])"
         ipRegex = QRegExp("^" + ipRange
@@ -70,8 +85,8 @@ class ProtocolSniffDialogController(QDialog):
         self.ui.btnAccept.clicked.connect(self.on_btn_accept_clicked)
         self.ui.btnClose.clicked.connect(self.close)
 
-        self.sniffer.rcv_thrd.started.connect(self.on_sniffer_rcv_started)
-        self.sniffer.rcv_thrd.stopped.connect(self.on_sniffer_rcv_stopped)
+        self.sniffer.started.connect(self.on_sniffer_rcv_started)
+        self.sniffer.stopped.connect(self.on_sniffer_rcv_stopped)
         self.sniffer.qt_signals.data_sniffed.connect(self.on_data_sniffed)
         self.sniffer.qt_signals.sniff_device_errors_changed.connect(
             self.on_device_errors_changed)
@@ -83,6 +98,8 @@ class ProtocolSniffDialogController(QDialog):
         self.ui.spinBoxBandwidth.editingFinished.connect(self.on_bw_edited)
         self.ui.lineEditIP.editingFinished.connect(self.on_usrp_ip_edited)
         self.ui.cbDevice.currentIndexChanged.connect(self.on_device_edited)
+
+        self.ui.btnLockBWSR.clicked.connect(self.on_btn_lock_bw_sr_clicked)
 
         self.ui.spinboxNoise.editingFinished.connect(self.on_noise_edited)
         self.ui.spinboxCenter.editingFinished.connect(self.on_center_edited)
@@ -103,15 +120,21 @@ class ProtocolSniffDialogController(QDialog):
 
     @pyqtSlot()
     def on_sample_rate_edited(self):
-        self.sniffer.rcv_thrd.sample_rate = self.ui.spinBoxSampleRate.value()
+        self.sniffer.rcv_device.sample_rate = self.ui.spinBoxSampleRate.value()
+        if self.bw_sr_are_locked:
+            self.ui.spinBoxBandwidth.setValue(self.ui.spinBoxSampleRate.value())
+            self.sniffer.rcv_device.bandwidth = self.ui.spinBoxBandwidth.value()
 
     @pyqtSlot()
     def on_freq_edited(self):
-        self.sniffer.rcv_thrd.freq = self.ui.spinBoxFreq.value()
+        self.sniffer.rcv_device.frequency = self.ui.spinBoxFreq.value()
 
     @pyqtSlot()
     def on_bw_edited(self):
-        self.sniffer.rcv_thrd.bandwidth = self.ui.spinBoxBandwidth.value()
+        self.sniffer.rcv_device.bandwidth = self.ui.spinBoxBandwidth.value()
+        if self.bw_sr_are_locked:
+            self.ui.spinBoxSampleRate.setValue(self.ui.spinBoxBandwidth.value())
+            self.sniffer.rcv_device.sample_rate = self.ui.spinBoxSampleRate.value()
 
     @pyqtSlot()
     def on_usrp_ip_edited(self):
@@ -119,7 +142,7 @@ class ProtocolSniffDialogController(QDialog):
 
     @pyqtSlot()
     def on_gain_edited(self):
-        self.sniffer.rcv_thrd.gain = self.ui.spinBoxGain.value()
+        self.sniffer.rcv_device.gain = self.ui.spinBoxGain.value()
 
     @pyqtSlot()
     def on_noise_edited(self):
@@ -144,7 +167,7 @@ class ProtocolSniffDialogController(QDialog):
     @pyqtSlot()
     def on_device_edited(self):
         dev = self.ui.cbDevice.currentText()
-        self.sniffer.device = dev
+        self.sniffer.device_name = dev
         self.ui.lineEditIP.setVisible(dev == "USRP")
         self.ui.labelIP.setVisible(dev == "USRP")
 
@@ -205,6 +228,13 @@ class ProtocolSniffDialogController(QDialog):
         self.ui.lineEditIP.setDisabled(True)
         self.ui.cbDevice.setDisabled(True)
 
+    def on_btn_lock_bw_sr_clicked(self):
+        self.bw_sr_are_locked = self.ui.btnLockBWSR.isChecked()
+        if self.bw_sr_are_locked:
+            self.ui.btnLockBWSR.setIcon(QIcon(":/icons/data/icons/lock.svg"))
+        else:
+             self.ui.btnLockBWSR.setIcon(QIcon(":/icons/data/icons/unlock.svg"))
+
     @pyqtSlot()
     def on_clear_clicked(self):
         self.ui.btnClear.setEnabled(False)
@@ -233,7 +263,8 @@ class ProtocolSniffDialogController(QDialog):
         self.ui.txtEditErrors.append(txt)
 
     def closeEvent(self, event: QCloseEvent):
-        self.sniffer.stop()
+        if hasattr(self, "sniffer"):
+            self.sniffer.stop()
         event.accept()
 
     @pyqtSlot(str)

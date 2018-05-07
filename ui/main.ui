@@ -34,7 +34,7 @@
        <bool>true</bool>
       </property>
       <widget class="QWidget" name="layoutWidget">
-       <layout class="QVBoxLayout" name="verticalLayout_3">
+       <layout class="QVBoxLayout" name="verticalLayout_3" stretch="0,3,0,1">
         <item>
          <widget class="QLineEdit" name="lnEdtTreeFilter">
           <property name="sizePolicy">
@@ -87,12 +87,22 @@
            <bool>false</bool>
           </property>
           <attribute name="headerCascadingSectionResizes">
-           <bool>false</bool>
+           <bool>true</bool>
           </attribute>
           <attribute name="headerStretchLastSection">
            <bool>false</bool>
           </attribute>
          </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="label">
+          <property name="text">
+           <string>Participants:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QListView" name="listViewParticipants"/>
         </item>
        </layout>
       </widget>
@@ -142,7 +152,7 @@
      <x>0</x>
      <y>0</y>
      <width>1017</width>
-     <height>23</height>
+     <height>21</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">
@@ -150,6 +160,9 @@
      <string>Fi&amp;le</string>
     </property>
     <addaction name="actionNew_Project"/>
+    <addaction name="actionProject_settings"/>
+    <addaction name="actionSave_project"/>
+    <addaction name="separator"/>
     <addaction name="actionOpen"/>
     <addaction name="actionRecord"/>
     <addaction name="actionSniff_protocol"/>
@@ -493,6 +506,19 @@
   <action name="actionSniff_protocol">
    <property name="text">
     <string>Sniff protocol...</string>
+   </property>
+  </action>
+  <action name="actionProject_settings">
+   <property name="text">
+    <string>Project settings...</string>
+   </property>
+  </action>
+  <action name="actionSave_project">
+   <property name="icon">
+    <iconset theme="document-save"/>
+   </property>
+   <property name="text">
+    <string>Save project</string>
    </property>
   </action>
  </widget>

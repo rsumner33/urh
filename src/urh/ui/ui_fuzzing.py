@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file '../ui/fuzzing.ui'
 #
-# Created by: PyQt5 UI code generator 5.5.1
+# Created by: PyQt5 UI code generator 5.6
 #
 # WARNING! All changes made in this file will be lost!
 
@@ -62,8 +61,6 @@ class Ui_FuzzingDialog(object):
         self.lPostBits.setAlignment(QtCore.Qt.AlignRight|QtCore.Qt.AlignTrailing|QtCore.Qt.AlignVCenter)
         self.lPostBits.setObjectName("lPostBits")
         self.horizontalLayout_2.addWidget(self.lPostBits)
-        spacerItem = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
-        self.horizontalLayout_2.addItem(spacerItem)
         self.gridLayout_5.addLayout(self.horizontalLayout_2, 1, 1, 1, 1)
         self.lFuzzingReferenceBlock = QtWidgets.QLabel(FuzzingDialog)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Preferred)
@@ -73,15 +70,15 @@ class Ui_FuzzingDialog(object):
         self.lFuzzingReferenceBlock.setSizePolicy(sizePolicy)
         self.lFuzzingReferenceBlock.setObjectName("lFuzzingReferenceBlock")
         self.gridLayout_5.addWidget(self.lFuzzingReferenceBlock, 2, 0, 1, 1)
-        self.spinBoxRefBlock = QtWidgets.QSpinBox(FuzzingDialog)
+        self.spinBoxFuzzBlock = QtWidgets.QSpinBox(FuzzingDialog)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
-        sizePolicy.setHeightForWidth(self.spinBoxRefBlock.sizePolicy().hasHeightForWidth())
-        self.spinBoxRefBlock.setSizePolicy(sizePolicy)
-        self.spinBoxRefBlock.setMaximum(999999999)
-        self.spinBoxRefBlock.setObjectName("spinBoxRefBlock")
-        self.gridLayout_5.addWidget(self.spinBoxRefBlock, 2, 1, 1, 1)
+        sizePolicy.setHeightForWidth(self.spinBoxFuzzBlock.sizePolicy().hasHeightForWidth())
+        self.spinBoxFuzzBlock.setSizePolicy(sizePolicy)
+        self.spinBoxFuzzBlock.setMaximum(999999999)
+        self.spinBoxFuzzBlock.setObjectName("spinBoxFuzzBlock")
+        self.gridLayout_5.addWidget(self.spinBoxFuzzBlock, 2, 1, 1, 1)
         self.lFuzzingStart = QtWidgets.QLabel(FuzzingDialog)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Maximum)
         sizePolicy.setHorizontalStretch(0)
@@ -294,7 +291,7 @@ class Ui_FuzzingDialog(object):
         self.lPreBits.setText(_translate("FuzzingDialog", "1111"))
         self.lFuzzedBits.setText(_translate("FuzzingDialog", "1010"))
         self.lPostBits.setText(_translate("FuzzingDialog", "010101"))
-        self.lFuzzingReferenceBlock.setText(_translate("FuzzingDialog", "Fuzzing Label Start Row:"))
+        self.lFuzzingReferenceBlock.setText(_translate("FuzzingDialog", "Block to fuzz:"))
         self.lFuzzingStart.setText(_translate("FuzzingDialog", "Fuzzing Label Start Index:"))
         self.lFuzzingEnd.setText(_translate("FuzzingDialog", "Fuzzing Label End Index:"))
         self.lFuzzedValues.setText(_translate("FuzzingDialog", "Fuzzed Values"))

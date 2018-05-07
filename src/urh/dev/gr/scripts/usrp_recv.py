@@ -6,19 +6,16 @@
 ##################################################
 
 from optparse import OptionParser
-import Initializer
-
-Initializer.init_path()
 
 from gnuradio import gr
 from gnuradio import uhd
 from gnuradio.eng_option import eng_option
 from grc_gnuradio import blks2 as grc_blks2
 from InputHandlerThread import InputHandlerThread
-from gnuradio import zeromq
+
 
 class top_block(gr.top_block):
-    def __init__(self, samp_rate, freq, gain, bw, device_args, port):
+    def __init__(self, samp_rate, freq, gain, bw, ip, port):
         gr.top_block.__init__(self, "Top Block")
 
         ##################################################
@@ -28,12 +25,13 @@ class top_block(gr.top_block):
         self.gain = gain
         self.freq = freq
         self.bw = bw
+        self.ip = ip
 
         ##################################################
         # Blocks
         ##################################################
         self.uhd_usrp_source_0 = uhd.usrp_source(
-            device_args,
+            ",".join(("addr=" + self.ip, "")),
             uhd.stream_args(
                 cpu_format="fc32",
                 channels=range(1),
@@ -43,12 +41,17 @@ class top_block(gr.top_block):
         self.uhd_usrp_source_0.set_center_freq(freq, 0)
         self.uhd_usrp_source_0.set_gain(gain, 0)
         self.uhd_usrp_source_0.set_bandwidth(bw, 0)
-        self.zeromq_push_sink_0 = zeromq.push_sink(gr.sizeof_gr_complex, 1, 'tcp://127.0.0.1:'+str(port))
+        self.blks2_tcp_sink_0 = grc_blks2.tcp_sink(
+            itemsize=gr.sizeof_gr_complex * 1,
+            addr="",        # Vorher "127.0.0.1"
+            port=port,
+            server=True,
+        )
 
         ##################################################
         # Connections
         ##################################################
-        self.connect((self.uhd_usrp_source_0, 0), (self.zeromq_push_sink_0, 0))
+        self.connect((self.uhd_usrp_source_0, 0), (self.blks2_tcp_sink_0, 0))
 
     def get_samp_rate(self):
         return self.samp_rate
@@ -85,11 +88,11 @@ if __name__ == '__main__':
     parser.add_option("-f", "--freq", dest="freq", help="Frequency", default=433000)
     parser.add_option("-g", "--gain", dest="gain", help="Gain", default=30)
     parser.add_option("-b", "--bandwidth", dest="bw", help="Bandwidth", default=200000)
-    parser.add_option("-d", "--device-args", dest="device_args", help="Device Args e.g. addr=192.168.10.2", default="")
+    parser.add_option("-i", "--ip", dest="ip", help="IP", default="192.168.10.2")
     parser.add_option("-p", "--port", dest="port", help="Port", default=1337)
     (options, args) = parser.parse_args()
     tb = top_block(float(options.samplerate), float(options.freq), int(options.gain),
-                   float(options.bw), str(options.device_args), int(options.port))
+                   float(options.bw), str(options.ip), int(options.port))
     iht = InputHandlerThread(tb)
     iht.start()
     tb.start()
