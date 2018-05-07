@@ -4583,6 +4583,7 @@ static __Pyx_memviewslice __pyx_f_3src_3urh_9cythonext_15signalFunctions_grab_pu
  *     cdef float NOISE = get_noise_for_mod_type(mod_type)             # <<<<<<<<<<<<<<
  *     ns = len(samples)
  * 
+ *     cdef float[::1] result = np.zeros(ns, dtype=np.float32, order="C")
  */
   __pyx_v_NOISE = __pyx_f_3src_3urh_9cythonext_15signalFunctions_get_noise_for_mod_type(__pyx_v_mod_type, 0);
 
